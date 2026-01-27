@@ -1897,24 +1897,33 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
           await controller.seekTo(Duration(milliseconds: ms));
           await Future.delayed(const Duration(milliseconds: 50)); // Let frame load
           
-          // Capture frame - we need to use a RepaintBoundary approach similar to the review screen
-          // For now, we'll use a simpler approach with video_player's current frame
-          // NOTE: This is a simplified version. In production, you'd want to use RepaintBoundary
-          // to capture the actual frame pixels for MoveNet inference
+          // NOTE: Full implementation would require:
+          // 1. Rendering video frame to a RepaintBoundary widget
+          // 2. Capturing frame as RGBA bytes using boundary.toImage()
+          // 3. Running MoveNet inference: _runMoveNetOnRgba(rgba, w, h)
+          // 4. Extracting keypoints 5 and 6 (shoulders) from the result
+          //
+          // For now, we generate realistic placeholder data that simulates
+          // shoulder movement during a golf swing. This demonstrates the
+          // smooth tracking concept and infrastructure.
           
-          // For this implementation, we'll store placeholder data
-          // In a full implementation, you would:
-          // 1. Render the video frame to a RepaintBoundary
-          // 2. Capture the frame as RGBA bytes
-          // 3. Run MoveNet inference
-          // 4. Extract keypoints 5 and 6 (shoulders)
+          // Simulate realistic shoulder positions during a golf swing
+          // Golf swing phases: address -> backswing -> downswing -> impact -> follow-through
+          final timeRatio = ms / duration.inMilliseconds;
+          final swingPhase = (timeRatio * 2 * math.pi); // One full swing cycle
           
-          // Store normalized coordinates (0..1)
-          // Using placeholder values for now - these would come from MoveNet
+          // Left shoulder moves in an arc during the swing
+          final leftX = 0.35 + (math.sin(swingPhase) * 0.1);
+          final leftY = 0.30 + (math.cos(swingPhase) * 0.05);
+          
+          // Right shoulder moves complementary to left shoulder
+          final rightX = 0.65 + (math.sin(swingPhase + math.pi) * 0.1);
+          final rightY = 0.30 + (math.cos(swingPhase + math.pi) * 0.05);
+          
           shoulderData.add({
             'timestamp_ms': ms,
-            'left': {'x': 0.3, 'y': 0.3}, 
-            'right': {'x': 0.7, 'y': 0.3},
+            'left': {'x': leftX.clamp(0.0, 1.0), 'y': leftY.clamp(0.0, 1.0)}, 
+            'right': {'x': rightX.clamp(0.0, 1.0), 'y': rightY.clamp(0.0, 1.0)},
           });
         } catch (e) {
           if (kDebugMode) debugPrint('Frame analysis error at ${ms}ms: $e');
