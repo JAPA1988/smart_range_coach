@@ -340,6 +340,7 @@ class CameraSmokeTestApp extends StatelessWidget {
   
   // Pre-computed shoulder positions
   List<Map<String, dynamic>>? _precomputedShoulders;
+  int _lastPrecomputedIndex = 0; // Cache last used index for faster lookup
 
     // Simple detected line model (normalized coordinates 0..1)
     // p1/p2 are relative to image width/height (0..1)
@@ -568,19 +569,43 @@ class CameraSmokeTestApp extends StatelessWidget {
       final currentMs = _controller!.value.position.inMilliseconds;
       final videoSize = _lastCapturedImageSize ?? Size(_controller!.value.size.width, _controller!.value.size.height);
       
-      // Find closest pre-computed frame (within 100ms tolerance)
+      // Optimized search: start from last known index and search nearby
+      // This is efficient because video playback is typically sequential
       Map<String, dynamic>? closestFrame;
       int minDiff = 999999;
+      final int searchRadius = 20; // Check frames within radius of last index
       
-      for (var frame in _precomputedShoulders!) {
+      // Clamp search range to valid indices
+      final int startIdx = math.max(0, _lastPrecomputedIndex - searchRadius);
+      final int endIdx = math.min(_precomputedShoulders!.length, _lastPrecomputedIndex + searchRadius);
+      
+      for (int i = startIdx; i < endIdx; i++) {
+        final frame = _precomputedShoulders![i];
         final diff = (frame['timestamp_ms'] as int - currentMs).abs();
-        if (diff < minDiff && diff < 100) {
+        if (diff < minDiff) {
           minDiff = diff;
           closestFrame = frame;
+          _lastPrecomputedIndex = i;
+        }
+        // Early exit if we found an exact or very close match
+        if (diff < 50) break;
+      }
+      
+      // Fallback to full search if no close match found (e.g., after seeking)
+      if (closestFrame == null || minDiff > 200) {
+        for (int i = 0; i < _precomputedShoulders!.length; i++) {
+          final frame = _precomputedShoulders![i];
+          final diff = (frame['timestamp_ms'] as int - currentMs).abs();
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestFrame = frame;
+            _lastPrecomputedIndex = i;
+          }
         }
       }
       
-      if (closestFrame != null) {
+      // Only update if within tolerance
+      if (closestFrame != null && minDiff < 150) {
         final left = closestFrame['left'] as Map<String, dynamic>;
         final right = closestFrame['right'] as Map<String, dynamic>;
         
@@ -1861,6 +1886,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
   }
 
   Future<void> _analyzeVideoAndSaveShoulders(String videoPath) async {
+    VideoPlayerController? controller;
     try {
       // Show progress dialog
       if (!mounted) return;
@@ -1881,7 +1907,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
 
       await MoveNetManager.init();
       
-      final controller = VideoPlayerController.file(File(videoPath));
+      controller = VideoPlayerController.file(File(videoPath));
       await controller.initialize();
       
       List<Map<String, dynamic>> shoulderData = [];
@@ -1930,21 +1956,29 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
         }
       }
       
-      await controller.dispose();
-      
       // Save JSON file next to video
       final jsonPath = videoPath.replaceAll('.mp4', '_shoulders.json');
       await File(jsonPath).writeAsString(jsonEncode(shoulderData));
       
       if (kDebugMode) debugPrint('Saved ${shoulderData.length} shoulder positions to $jsonPath');
       
-      if (mounted) {
-        Navigator.of(context).pop(); // Close progress dialog
-      }
     } catch (e) {
       if (kDebugMode) debugPrint('Video analysis failed: $e');
+    } finally {
+      // Ensure controller is always disposed
+      try {
+        await controller?.dispose();
+      } catch (e) {
+        if (kDebugMode) debugPrint('Controller disposal failed: $e');
+      }
+      
+      // Close progress dialog
       if (mounted) {
-        Navigator.of(context).pop(); // Close progress dialog
+        try {
+          Navigator.of(context).pop();
+        } catch (e) {
+          if (kDebugMode) debugPrint('Failed to close progress dialog: $e');
+        }
       }
     }
   }
