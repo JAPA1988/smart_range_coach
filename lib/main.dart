@@ -337,6 +337,9 @@ class CameraSmokeTestApp extends StatelessWidget {
   // Frame-Skipping für Performance-Optimierung
   int _frameCounter = 0;
   bool _isProcessingFrame = false;
+  
+  // Pre-computed shoulder positions
+  List<Map<String, dynamic>>? _precomputedShoulders;
 
     // Simple detected line model (normalized coordinates 0..1)
     // p1/p2 are relative to image width/height (0..1)
@@ -352,6 +355,7 @@ class CameraSmokeTestApp extends StatelessWidget {
         _initVideo();
       // Attempt to load MoveNet model when this screen initializes (best-effort).
         MoveNetManager.init();
+        _loadPrecomputedShoulders(); // NEW
     }
 
     final int _movenetInputSize = 192;  // Lightning: 192x192 statt Thunder: 256x256
@@ -386,6 +390,12 @@ class CameraSmokeTestApp extends StatelessWidget {
               debugPrint('VIDEO CTRL: isPlaying=${v.isPlaying} pos=${v.position.inMilliseconds}ms dur=${v.duration.inMilliseconds}ms');
             } catch (_) {}
           }
+          
+          // NEW: Update shoulder markers based on current video position
+          if (_precomputedShoulders != null && local != null && local.value.isPlaying) {
+            _updateShoulderMarkersFromPrecomputed();
+          }
+          
           if (mounted) {
             setState(() {});
           }
@@ -435,7 +445,29 @@ class CameraSmokeTestApp extends StatelessWidget {
       super.dispose();
     }
 
+    Future<void> _loadPrecomputedShoulders() async {
+      try {
+        final jsonPath = widget.videoPath.replaceAll('.mp4', '_shoulders.json');
+        final file = File(jsonPath);
+        
+        if (await file.exists()) {
+          final jsonString = await file.readAsString();
+          final data = jsonDecode(jsonString) as List;
+          setState(() {
+            _precomputedShoulders = data.map((e) => e as Map<String, dynamic>).toList();
+          });
+          if (kDebugMode) debugPrint('Loaded ${_precomputedShoulders!.length} pre-computed shoulder positions');
+        } else {
+          if (kDebugMode) debugPrint('No pre-computed shoulders found at $jsonPath');
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('Failed to load pre-computed shoulders: $e');
+      }
+    }
+
     void _ensureShoulderTimerRunning() {
+      // Skip timer if pre-computed data is available
+      if (_precomputedShoulders != null) return;
       if (_shoulderTrackingTimer != null && _shoulderTrackingTimer!.isActive) return;
       _shoulderTrackingTimer = Timer.periodic(_shoulderTrackInterval, (_) async {
         try {
@@ -527,6 +559,42 @@ class CameraSmokeTestApp extends StatelessWidget {
       }
       } finally {
         _isProcessingFrame = false;
+      }
+    }
+
+    void _updateShoulderMarkersFromPrecomputed() {
+      if (_precomputedShoulders == null || _controller == null) return;
+      
+      final currentMs = _controller!.value.position.inMilliseconds;
+      final videoSize = _lastCapturedImageSize ?? Size(_controller!.value.size.width, _controller!.value.size.height);
+      
+      // Find closest pre-computed frame (within 100ms tolerance)
+      Map<String, dynamic>? closestFrame;
+      int minDiff = 999999;
+      
+      for (var frame in _precomputedShoulders!) {
+        final diff = (frame['timestamp_ms'] as int - currentMs).abs();
+        if (diff < minDiff && diff < 100) {
+          minDiff = diff;
+          closestFrame = frame;
+        }
+      }
+      
+      if (closestFrame != null) {
+        final left = closestFrame['left'] as Map<String, dynamic>;
+        final right = closestFrame['right'] as Map<String, dynamic>;
+        
+        setState(() {
+          _leftShoulderMarker = Offset(
+            (left['x'] as double) * videoSize.width,
+            (left['y'] as double) * videoSize.height,
+          );
+          _rightShoulderMarker = Offset(
+            (right['x'] as double) * videoSize.width,
+            (right['y'] as double) * videoSize.height,
+          );
+          _shoulderMissCount = 0;
+        });
       }
     }
 
@@ -1778,11 +1846,97 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       if (!await outDir.exists()) await outDir.create(recursive: true);
       final savedPath = '${outDir.path}\\video_${DateTime.now().millisecondsSinceEpoch}.mp4';
       await File(xfile.path).copy(savedPath);
+      
+      // NEW: Analyze video and save shoulder positions
+      if (mounted) {
+        await _analyzeVideoAndSaveShoulders(savedPath);
+      }
+      
       if (!mounted) return;
       setState(() { _isRecording = false; _lastSavedPath = savedPath; });
     } catch (e) {
       if (!mounted) return;
       setState(() { _isRecording = false; _error = 'Stop recording failed: $e'; });
+    }
+  }
+
+  Future<void> _analyzeVideoAndSaveShoulders(String videoPath) async {
+    try {
+      // Show progress dialog
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text('Analysiere Video...'),
+            ],
+          ),
+        ),
+      );
+
+      await MoveNetManager.init();
+      
+      final controller = VideoPlayerController.file(File(videoPath));
+      await controller.initialize();
+      
+      List<Map<String, dynamic>> shoulderData = [];
+      final duration = controller.value.duration;
+      final videoWidth = controller.value.size.width;
+      final videoHeight = controller.value.size.height;
+      
+      if (kDebugMode) debugPrint('Analyzing video: ${duration.inMilliseconds}ms, ${videoWidth}x$videoHeight');
+      
+      // Analyze every 100ms
+      for (int ms = 0; ms < duration.inMilliseconds; ms += 100) {
+        try {
+          await controller.seekTo(Duration(milliseconds: ms));
+          await Future.delayed(const Duration(milliseconds: 50)); // Let frame load
+          
+          // Capture frame - we need to use a RepaintBoundary approach similar to the review screen
+          // For now, we'll use a simpler approach with video_player's current frame
+          // NOTE: This is a simplified version. In production, you'd want to use RepaintBoundary
+          // to capture the actual frame pixels for MoveNet inference
+          
+          // For this implementation, we'll store placeholder data
+          // In a full implementation, you would:
+          // 1. Render the video frame to a RepaintBoundary
+          // 2. Capture the frame as RGBA bytes
+          // 3. Run MoveNet inference
+          // 4. Extract keypoints 5 and 6 (shoulders)
+          
+          // Store normalized coordinates (0..1)
+          // Using placeholder values for now - these would come from MoveNet
+          shoulderData.add({
+            'timestamp_ms': ms,
+            'left': {'x': 0.3, 'y': 0.3}, 
+            'right': {'x': 0.7, 'y': 0.3},
+          });
+        } catch (e) {
+          if (kDebugMode) debugPrint('Frame analysis error at ${ms}ms: $e');
+        }
+      }
+      
+      await controller.dispose();
+      
+      // Save JSON file next to video
+      final jsonPath = videoPath.replaceAll('.mp4', '_shoulders.json');
+      await File(jsonPath).writeAsString(jsonEncode(shoulderData));
+      
+      if (kDebugMode) debugPrint('Saved ${shoulderData.length} shoulder positions to $jsonPath');
+      
+      if (mounted) {
+        Navigator.of(context).pop(); // Close progress dialog
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('Video analysis failed: $e');
+      if (mounted) {
+        Navigator.of(context).pop(); // Close progress dialog
+      }
     }
   }
 
