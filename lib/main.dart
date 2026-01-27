@@ -185,35 +185,55 @@ class _CropPainter extends CustomPainter {
 }
 
 // Painter for persistent shoulder markers
+// Painter für animierte Schulter-Marker mit Smooth-Bewegung
 class _ShoulderMarkerPainter extends CustomPainter {
   final Offset? left;
   final Offset? right;
-  final Size? imageSize; // captured image pixel size used to map markers to canvas
+  final Size? imageSize;
+  
   _ShoulderMarkerPainter({this.left, this.right, this.imageSize});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.fill..color = Colors.redAccent;
-    final double radius = 8.0;
-    // If markers are provided in pixel coordinates relative to captured image, map to canvas size
+    final paint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = Colors.redAccent;
+    
+    final strokePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..color = Colors.white
+      ..strokeWidth = 2.0;
+    
+    final double radius = 10.0; // Etwas größer für bessere Sichtbarkeit
+    
     if (left != null && imageSize != null) {
       final double sx = size.width / imageSize!.width;
       final double sy = size.height / imageSize!.height;
       final dx = left!.dx * sx;
       final dy = left!.dy * sy;
-      canvas.drawCircle(Offset(dx, dy), radius, paint);
+      
+      // Äußerer weißer Ring
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      // Innerer roter Punkt
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
     }
+    
     if (right != null && imageSize != null) {
       final double sx = size.width / imageSize!.width;
       final double sy = size.height / imageSize!.height;
       final dx = right!.dx * sx;
       final dy = right!.dy * sy;
-      canvas.drawCircle(Offset(dx, dy), radius, paint);
+      
+      // Äußerer weißer Ring
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      // Innerer roter Punkt
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _ShoulderMarkerPainter old) => old.left != left || old.right != right || old.imageSize != imageSize;
+  bool shouldRepaint(covariant _ShoulderMarkerPainter old) => 
+    old.left != left || old.right != right || old.imageSize != imageSize;
 }
 
 // Top-level isolate helper: center-crop -> bilinear resize -> normalize
@@ -337,6 +357,9 @@ class CameraSmokeTestApp extends StatelessWidget {
   // Frame-Skipping für Performance-Optimierung
   int _frameCounter = 0;
   bool _isProcessingFrame = false;
+  
+  // Vorberechnete Schulter-Positionen
+  List<Map<String, dynamic>>? _precomputedShoulders;
 
     // Simple detected line model (normalized coordinates 0..1)
     // p1/p2 are relative to image width/height (0..1)
@@ -350,8 +373,102 @@ class CameraSmokeTestApp extends StatelessWidget {
     void initState() {
       super.initState();
         _initVideo();
+        _loadPrecomputedShoulders();
       // Attempt to load MoveNet model when this screen initializes (best-effort).
         MoveNetManager.init();
+    }
+
+    Future<void> _loadPrecomputedShoulders() async {
+      try {
+        final jsonPath = widget.videoPath.replaceAll('.mp4', '_shoulders.json');
+        final file = File(jsonPath);
+        
+        if (await file.exists()) {
+          final jsonString = await file.readAsString();
+          final data = jsonDecode(jsonString) as List;
+          setState(() {
+            _precomputedShoulders = data.map((e) => e as Map<String, dynamic>).toList();
+          });
+          if (kDebugMode) debugPrint('Loaded ${_precomputedShoulders!.length} pre-computed shoulder positions');
+        } else {
+          if (kDebugMode) debugPrint('No pre-computed shoulders found, will use live tracking');
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('Failed to load pre-computed shoulders: $e');
+      }
+    }
+
+    void _updateShoulderMarkersFromPrecomputed() {
+      if (_precomputedShoulders == null || _controller == null || _precomputedShoulders!.isEmpty) return;
+      
+      final currentMs = _controller!.value.position.inMilliseconds;
+      final videoSize = _lastCapturedImageSize ?? Size(_controller!.value.size.width, _controller!.value.size.height);
+      
+      // Finde die zwei nächsten Frames (vorher und nachher)
+      Map<String, dynamic>? frameBefore;
+      Map<String, dynamic>? frameAfter;
+      
+      for (int i = 0; i < _precomputedShoulders!.length; i++) {
+        final frame = _precomputedShoulders![i];
+        final frameMs = frame['timestamp_ms'] as int;
+        
+        if (frameMs <= currentMs) {
+          frameBefore = frame;
+        }
+        if (frameMs >= currentMs && frameAfter == null) {
+          frameAfter = frame;
+          break;
+        }
+      }
+      
+      // Falls wir zwei Frames haben, interpoliere zwischen ihnen
+      if (frameBefore != null && frameAfter != null) {
+        final beforeMs = frameBefore['timestamp_ms'] as int;
+        final afterMs = frameAfter['timestamp_ms'] as int;
+        
+        // Interpolationsfaktor (0.0 = frameBefore, 1.0 = frameAfter)
+        final double t;
+        if (afterMs == beforeMs) {
+          t = 0.0;
+        } else {
+          t = ((currentMs - beforeMs) / (afterMs - beforeMs)).clamp(0.0, 1.0);
+        }
+        
+        // Interpoliere linke Schulter
+        final leftBefore = frameBefore['left'] as Map<String, dynamic>;
+        final leftAfter = frameAfter['left'] as Map<String, dynamic>;
+        final leftX = (leftBefore['x'] as double) * (1 - t) + (leftAfter['x'] as double) * t;
+        final leftY = (leftBefore['y'] as double) * (1 - t) + (leftAfter['y'] as double) * t;
+        
+        // Interpoliere rechte Schulter
+        final rightBefore = frameBefore['right'] as Map<String, dynamic>;
+        final rightAfter = frameAfter['right'] as Map<String, dynamic>;
+        final rightX = (rightBefore['x'] as double) * (1 - t) + (rightAfter['x'] as double) * t;
+        final rightY = (rightBefore['y'] as double) * (1 - t) + (rightAfter['y'] as double) * t;
+        
+        setState(() {
+          _leftShoulderMarker = Offset(leftX * videoSize.width, leftY * videoSize.height);
+          _rightShoulderMarker = Offset(rightX * videoSize.width, rightY * videoSize.height);
+          _shoulderMissCount = 0;
+        });
+      } 
+      // Falls nur ein Frame vorhanden, verwende den
+      else if (frameBefore != null) {
+        final left = frameBefore['left'] as Map<String, dynamic>;
+        final right = frameBefore['right'] as Map<String, dynamic>;
+        
+        setState(() {
+          _leftShoulderMarker = Offset(
+            (left['x'] as double) * videoSize.width,
+            (left['y'] as double) * videoSize.height,
+          );
+          _rightShoulderMarker = Offset(
+            (right['x'] as double) * videoSize.width,
+            (right['y'] as double) * videoSize.height,
+          );
+          _shoulderMissCount = 0;
+        });
+      }
     }
 
     final int _movenetInputSize = 192;  // Lightning: 192x192 statt Thunder: 256x256
@@ -386,6 +503,12 @@ class CameraSmokeTestApp extends StatelessWidget {
               debugPrint('VIDEO CTRL: isPlaying=${v.isPlaying} pos=${v.position.inMilliseconds}ms dur=${v.duration.inMilliseconds}ms');
             } catch (_) {}
           }
+          
+          // Verwende vorberechnete Positionen falls verfügbar
+          if (_precomputedShoulders != null) {
+            _updateShoulderMarkersFromPrecomputed();
+          }
+          
           if (mounted) {
             setState(() {});
           }
@@ -436,6 +559,12 @@ class CameraSmokeTestApp extends StatelessWidget {
     }
 
     void _ensureShoulderTimerRunning() {
+      // Nur starten wenn KEINE vorberechneten Daten vorhanden sind
+      if (_precomputedShoulders != null) {
+        if (kDebugMode) debugPrint('Using pre-computed shoulders, skipping live tracking');
+        return;
+      }
+      
       if (_shoulderTrackingTimer != null && _shoulderTrackingTimer!.isActive) return;
       _shoulderTrackingTimer = Timer.periodic(_shoulderTrackInterval, (_) async {
         try {
@@ -1778,11 +1907,201 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       if (!await outDir.exists()) await outDir.create(recursive: true);
       final savedPath = '${outDir.path}\\video_${DateTime.now().millisecondsSinceEpoch}.mp4';
       await File(xfile.path).copy(savedPath);
+      
+      // Video analysieren
+      if (mounted) {
+        await _analyzeVideoAndSaveShoulders(savedPath);
+      }
+      
       if (!mounted) return;
       setState(() { _isRecording = false; _lastSavedPath = savedPath; });
     } catch (e) {
       if (!mounted) return;
       setState(() { _isRecording = false; _error = 'Stop recording failed: $e'; });
+    }
+  }
+
+  Future<void> _analyzeVideoAndSaveShoulders(String videoPath) async {
+    try {
+      if (!mounted) return;
+      
+      // Progress-Dialog anzeigen
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Analysiere Video...'),
+              SizedBox(height: 8),
+              Text('Bitte warten...', style: TextStyle(fontSize: 12, color: Colors.white70)),
+            ],
+          ),
+        ),
+      );
+
+      // MoveNet initialisieren
+      await MoveNetManager.init();
+      if (MoveNetManager.interpreter == null) {
+        throw Exception('MoveNet konnte nicht geladen werden');
+      }
+      
+      // Video-Controller für Frame-Extraktion
+      final tempController = VideoPlayerController.file(File(videoPath));
+      await tempController.initialize();
+      await tempController.pause();
+      
+      List<Map<String, dynamic>> shoulderData = [];
+      final duration = tempController.value.duration;
+      final videoWidth = tempController.value.size.width.toInt();
+      final videoHeight = tempController.value.size.height.toInt();
+      
+      if (kDebugMode) debugPrint('Video: ${videoWidth}x${videoHeight}, ${duration.inMilliseconds}ms');
+      
+      // Erstelle temporären Widget für Frame-Capture
+      // Wir müssen einen Overlay-Widget erstellen, um Frames zu capturen
+      final GlobalKey repaintKey = GlobalKey();
+      
+      // Overlay-Entry erstellen
+      OverlayEntry? overlayEntry;
+      overlayEntry = OverlayEntry(
+        builder: (context) => Positioned(
+          left: -10000, // Außerhalb des sichtbaren Bereichs
+          top: -10000,
+          child: RepaintBoundary(
+            key: repaintKey,
+            child: SizedBox(
+              width: videoWidth.toDouble(),
+              height: videoHeight.toDouble(),
+              child: VideoPlayer(tempController),
+            ),
+          ),
+        ),
+      );
+      
+      Overlay.of(context).insert(overlayEntry);
+      
+      // Warte kurz, damit der Widget-Tree aufgebaut wird
+      await Future.delayed(Duration(milliseconds: 500));
+      
+      // Frame-by-Frame Analyse (alle 50ms = 20fps)
+      int frameCount = 0;
+      for (int ms = 0; ms < duration.inMilliseconds; ms += 50) {
+        try {
+          // Seek zu diesem Frame
+          await tempController.seekTo(Duration(milliseconds: ms));
+          await Future.delayed(Duration(milliseconds: 100)); // Frame laden lassen
+          
+          // Capture Frame
+          final renderObj = repaintKey.currentContext?.findRenderObject();
+          if (renderObj is! RenderRepaintBoundary) {
+            if (kDebugMode) debugPrint('RenderRepaintBoundary nicht gefunden bei ${ms}ms');
+            continue;
+          }
+          
+          final boundary = renderObj as RenderRepaintBoundary;
+          final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
+          final byteData = await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+          
+          if (byteData == null) {
+            if (kDebugMode) debugPrint('ByteData null bei ${ms}ms');
+            continue;
+          }
+          
+          final rgba = byteData.buffer.asUint8List();
+          final w = captured.width;
+          final h = captured.height;
+          
+          // MoveNet-Inferenz
+          final prep = await compute(_resizeNormalize, {'rgba': rgba, 'w': w, 'h': h, 'size': 192, 'centerCrop': true});
+          final inputImage = prep['image'] as List;
+          final cropMeta = prep['crop'] as Map<String, dynamic>;
+          
+          // Konvertiere zu Uint8List
+          final Uint8List uint8Input = Uint8List(192 * 192 * 3);
+          int idx = 0;
+          final image3d = inputImage as List<List<List<double>>>;
+          for (int ty = 0; ty < 192; ty++) {
+            for (int tx = 0; tx < 192; tx++) {
+              for (int c = 0; c < 3; c++) {
+                uint8Input[idx++] = (image3d[ty][tx][c] * 255).round().clamp(0, 255);
+              }
+            }
+          }
+          
+          final input = uint8Input.buffer.asUint8List().reshape([1, 192, 192, 3]);
+          final output = List.generate(1, (_) => List.generate(1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
+          MoveNetManager.interpreter!.run(input, output);
+          
+          final rawOut = output[0][0];
+          final cropX = cropMeta['x'] as int;
+          final cropY = cropMeta['y'] as int;
+          final cropW = cropMeta['w'] as int;
+          final cropH = cropMeta['h'] as int;
+          
+          // Remap Keypoints zu Original-Koordinaten
+          List<Map<String, double>> keypoints = [];
+          for (int i = 0; i < 17; i++) {
+            final y = (rawOut[i][0] as double).clamp(0.0, 1.0);
+            final x = (rawOut[i][1] as double).clamp(0.0, 1.0);
+            final score = (rawOut[i][2] as double).clamp(0.0, 1.0);
+            
+            // Remap von Crop zu Original
+            final double origX = (cropX + x * cropW) / w;
+            final double origY = (cropY + y * cropH) / h;
+            
+            keypoints.add({'x': origX, 'y': origY, 'score': score});
+          }
+          
+          // Extrahiere Schultern (Index 5 = left shoulder, 6 = right shoulder)
+          final leftShoulder = keypoints[5];
+          final rightShoulder = keypoints[6];
+          
+          // Speichere nur wenn Score hoch genug
+          if (leftShoulder['score']! >= 0.3 && rightShoulder['score']! >= 0.3) {
+            shoulderData.add({
+              'timestamp_ms': ms,
+              'left': {'x': leftShoulder['x'], 'y': leftShoulder['y']},
+              'right': {'x': rightShoulder['x'], 'y': rightShoulder['y']},
+            });
+            frameCount++;
+          }
+          
+          captured.dispose();
+        } catch (e) {
+          if (kDebugMode) debugPrint('Frame-Analyse fehlgeschlagen bei ${ms}ms: $e');
+        }
+      }
+      
+      // Cleanup
+      overlayEntry.remove();
+      await tempController.dispose();
+      
+      // JSON-Datei speichern
+      if (shoulderData.isNotEmpty) {
+        final jsonPath = videoPath.replaceAll('.mp4', '_shoulders.json');
+        await File(jsonPath).writeAsString(jsonEncode(shoulderData));
+        if (kDebugMode) debugPrint('Saved $frameCount shoulder positions to $jsonPath');
+      } else {
+        if (kDebugMode) debugPrint('Keine Schultern erkannt!');
+      }
+      
+      if (mounted) {
+        Navigator.of(context).pop(); // Dialog schließen
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('Video-Analyse fehlgeschlagen: $e');
+      if (mounted) {
+        try {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Analyse fehlgeschlagen: $e')),
+          );
+        } catch (_) {}
+      }
     }
   }
 
