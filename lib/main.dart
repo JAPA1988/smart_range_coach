@@ -431,6 +431,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   Offset? _rightElbowMarker;
   // NEU: Alle Golf-Keypoints in einer Map
   Map<String, Offset?>? _allKeypoints;
+  // Smoothing für flüssigere Bewegung
+  final Map<String, Offset?> _smoothedKeypoints = {};
+  final double _smoothingFactor =
+      0.3; // 0 = keine Smoothing, 1 = maximales Smoothing
   int _shoulderMissCount = 0;
   final int _maxShoulderMiss = 6; // hide after this many misses
   Timer? _shoulderTrackingTimer;
@@ -511,75 +515,149 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     final videoSize = _lastCapturedImageSize ??
         Size(_controller!.value.size.width, _controller!.value.size.height);
 
-    // Finde die zwei nächsten Frames (vorher und nachher)
-    Map<String, dynamic>? frameBefore;
-    Map<String, dynamic>? frameAfter;
+    // Finde 4 umliegende Frames für Cubic Interpolation
+    Map<String, dynamic>? frame0, frame1, frame2, frame3;
+    int closestIndex = 0;
+    int minDiff = 999999;
 
+    // Finde den nächsten Frame
     for (int i = 0; i < _precomputedShoulders!.length; i++) {
-      final frame = _precomputedShoulders![i];
-      final frameMs = frame['timestamp_ms'] as int;
-
-      if (frameMs <= currentMs) {
-        frameBefore = frame;
-      }
-      if (frameMs >= currentMs && frameAfter == null) {
-        frameAfter = frame;
-        break;
+      final frameMs = _precomputedShoulders![i]['timestamp_ms'] as int;
+      final diff = (frameMs - currentMs).abs();
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIndex = i;
       }
     }
 
-    // Falls wir zwei Frames haben, interpoliere zwischen ihnen
-    if (frameBefore != null && frameAfter != null) {
-      final beforeMs = frameBefore['timestamp_ms'] as int;
-      final afterMs = frameAfter['timestamp_ms'] as int;
+    // Hole 4 Frames (Catmull-Rom benötigt 4 Punkte)
+    if (closestIndex > 0) frame0 = _precomputedShoulders![closestIndex - 1];
+    frame1 = closestIndex >= 0 ? _precomputedShoulders![closestIndex] : null;
+    frame2 = closestIndex < _precomputedShoulders!.length - 1
+        ? _precomputedShoulders![closestIndex + 1]
+        : null;
+    frame3 = closestIndex < _precomputedShoulders!.length - 2
+        ? _precomputedShoulders![closestIndex + 2]
+        : null;
 
-      final double t;
-      if (afterMs == beforeMs) {
-        t = 0.0;
-      } else {
-        t = ((currentMs - beforeMs) / (afterMs - beforeMs)).clamp(0.0, 1.0);
+    // Fallback auf Linear Interpolation wenn nicht genug Frames
+    if (frame1 == null || frame2 == null) {
+      return;
+    }
+
+    final t1 = (frame1['timestamp_ms'] as int).toDouble();
+    final t2 = (frame2['timestamp_ms'] as int).toDouble();
+
+    if (t2 == t1) {
+      return;
+    }
+
+    // Normalisierter Interpolationsfaktor (0..1 zwischen frame1 und frame2)
+    final double t = ((currentMs - t1) / (t2 - t1)).clamp(0.0, 1.0);
+
+    // Interpoliere alle Golf-Keypoints mit Cubic (Catmull-Rom)
+    const keypointNames = [
+      'left_shoulder',
+      'right_shoulder',
+      'left_elbow',
+      'right_elbow',
+      'left_wrist',
+      'right_wrist',
+      'left_hip',
+      'right_hip',
+      'left_knee',
+      'right_knee',
+    ];
+
+    final interpolatedKeypoints = <String, Offset?>{};
+
+    for (final name in keypointNames) {
+      final kp1 = frame1['keypoints']?[name];
+      final kp2 = frame2['keypoints']?[name];
+
+      if (kp1 != null && kp2 != null) {
+        double x, y;
+
+        // Wenn wir 4 Punkte haben, nutze Catmull-Rom Spline
+        if (frame0 != null && frame3 != null) {
+          final kp0 = frame0['keypoints']?[name];
+          final kp3 = frame3['keypoints']?[name];
+
+          if (kp0 != null && kp3 != null) {
+            // Catmull-Rom Spline Interpolation
+            x = _catmullRom(
+              kp0['x'] as double,
+              kp1['x'] as double,
+              kp2['x'] as double,
+              kp3['x'] as double,
+              t,
+            );
+            y = _catmullRom(
+              kp0['y'] as double,
+              kp1['y'] as double,
+              kp2['y'] as double,
+              kp3['y'] as double,
+              t,
+            );
+          } else {
+            // Fallback: Linear
+            x = (kp1['x'] as double) * (1 - t) + (kp2['x'] as double) * t;
+            y = (kp1['y'] as double) * (1 - t) + (kp2['y'] as double) * t;
+          }
+        } else {
+          // Fallback: Linear
+          x = (kp1['x'] as double) * (1 - t) + (kp2['x'] as double) * t;
+          y = (kp1['y'] as double) * (1 - t) + (kp2['y'] as double) * t;
+        }
+
+        interpolatedKeypoints[name] =
+            Offset(x * videoSize.width, y * videoSize.height);
       }
+    }
 
-      // Interpoliere alle Golf-Keypoints
-      final keypointNames = [
-        'left_shoulder',
-        'right_shoulder',
-        'left_elbow',
-        'right_elbow',
-        'left_wrist',
-        'right_wrist',
-        'left_hip',
-        'right_hip',
-        'left_knee',
-        'right_knee',
-      ];
+    // Smoothing anwenden
+    _applySmoothingToKeypoints(interpolatedKeypoints);
 
-      final interpolatedKeypoints = <String, Offset?>{};
+    setState(() {
+      _allKeypoints = _smoothedKeypoints;
+      _shoulderMissCount = 0;
 
-      for (final name in keypointNames) {
-        final beforeKp = frameBefore['keypoints']?[name];
-        final afterKp = frameAfter['keypoints']?[name];
+      // Backward compatibility: Setze auch Schulter-Marker
+      _leftShoulderMarker = _smoothedKeypoints['left_shoulder'];
+      _rightShoulderMarker = _smoothedKeypoints['right_shoulder'];
+    });
+  }
 
-        if (beforeKp != null && afterKp != null) {
-          final x = (beforeKp['x'] as double) * (1 - t) +
-              (afterKp['x'] as double) * t;
-          final y = (beforeKp['y'] as double) * (1 - t) +
-              (afterKp['y'] as double) * t;
+  /// Catmull-Rom Spline Interpolation (smooth curves)
+  double _catmullRom(double p0, double p1, double p2, double p3, double t) {
+    final t2 = t * t;
+    final t3 = t2 * t;
 
-          interpolatedKeypoints[name] =
-              Offset(x * videoSize.width, y * videoSize.height);
+    return 0.5 *
+        ((2 * p1) +
+            (-p0 + p2) * t +
+            (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+            (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  }
+
+  /// Predictive Smoothing für flüssigere Bewegung
+  void _applySmoothingToKeypoints(Map<String, Offset?> rawKeypoints) {
+    rawKeypoints.forEach((name, newPos) {
+      if (newPos != null) {
+        final oldPos = _smoothedKeypoints[name];
+
+        if (oldPos == null) {
+          // Erster Frame: Keine Smoothing
+          _smoothedKeypoints[name] = newPos;
+        } else {
+          // Exponential Moving Average (EMA)
+          _smoothedKeypoints[name] = Offset(
+            oldPos.dx * _smoothingFactor + newPos.dx * (1 - _smoothingFactor),
+            oldPos.dy * _smoothingFactor + newPos.dy * (1 - _smoothingFactor),
+          );
         }
       }
-
-      setState(() {
-        _allKeypoints = interpolatedKeypoints;
-        _shoulderMissCount = 0;
-
-        // Backward compatibility: Setze auch Schulter-Marker
-        _leftShoulderMarker = interpolatedKeypoints['left_shoulder'];
-        _rightShoulderMarker = interpolatedKeypoints['right_shoulder'];
-      });
-    }
+    });
   }
 
   final int _movenetInputSize =
@@ -2663,12 +2741,23 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       Overlay.of(context).insert(overlayEntry);
       await Future.delayed(Duration(milliseconds: 500));
 
-      // Frame-by-Frame Analyse mit MoveNet (alle 50ms)
+      // Frame-by-Frame Analyse mit MoveNet (30fps = 33.33ms)
       int frameCount = 0;
-      for (int ms = 0; ms < duration.inMilliseconds; ms += 50) {
+      final estimatedFps = 30;
+      final msPerFrame = 1000 / estimatedFps;
+
+      if (kDebugMode)
+        debugPrint(
+            '📊 Video FPS: ~$estimatedFps, ${msPerFrame.toStringAsFixed(2)}ms pro Frame');
+
+      for (double frameTime = 0;
+          frameTime < duration.inMilliseconds;
+          frameTime += msPerFrame) {
+        final ms = frameTime.round();
+
         try {
           await tempController.seekTo(Duration(milliseconds: ms));
-          await Future.delayed(Duration(milliseconds: 100));
+          await Future.delayed(Duration(milliseconds: 50));
 
           // Capture Frame
           final renderObj = repaintKey.currentContext?.findRenderObject();
@@ -2762,12 +2851,14 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
           if (leftShoulder['score']! >= 0.3 && rightShoulder['score']! >= 0.3) {
             poseData.add({
               'timestamp_ms': ms,
+              'frame_index': frameCount,
               'keypoints': keypoints,
             });
             frameCount++;
 
-            if (kDebugMode && frameCount % 10 == 0) {
-              debugPrint('Analyzed $frameCount frames...');
+            if (kDebugMode && frameCount % 30 == 0) {
+              debugPrint(
+                  '✅ Analyzed $frameCount frames... (${(ms / duration.inMilliseconds * 100).toStringAsFixed(1)}%)');
             }
           }
 
