@@ -515,129 +515,117 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     final videoSize = _lastCapturedImageSize ??
         Size(_controller!.value.size.width, _controller!.value.size.height);
 
-    // Finde 4 umliegende Frames für Cubic Interpolation
-    Map<String, dynamic>? frame0, frame1, frame2, frame3;
-    int closestIndex = 0;
-    int minDiff = 999999;
+    // Finde die zwei nächsten Frames (vorher und nachher) für lineare Interpolation
+    Map<String, dynamic>? frameBefore;
+    Map<String, dynamic>? frameAfter;
 
-    // Finde den nächsten Frame
     for (int i = 0; i < _precomputedShoulders!.length; i++) {
-      final frameMs = _precomputedShoulders![i]['timestamp_ms'] as int;
-      final diff = (frameMs - currentMs).abs();
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestIndex = i;
+      final frame = _precomputedShoulders![i];
+      final frameMs = frame['timestamp_ms'] as int;
+
+      if (frameMs <= currentMs) {
+        frameBefore = frame;
+      }
+      if (frameMs >= currentMs && frameAfter == null) {
+        frameAfter = frame;
+        break;
       }
     }
 
-    // Hole 4 Frames (Catmull-Rom benötigt 4 Punkte)
-    if (closestIndex > 0) frame0 = _precomputedShoulders![closestIndex - 1];
-    frame1 = closestIndex >= 0 ? _precomputedShoulders![closestIndex] : null;
-    frame2 = closestIndex < _precomputedShoulders!.length - 1
-        ? _precomputedShoulders![closestIndex + 1]
-        : null;
-    frame3 = closestIndex < _precomputedShoulders!.length - 2
-        ? _precomputedShoulders![closestIndex + 2]
-        : null;
+    // Falls wir zwei Frames haben, interpoliere zwischen ihnen
+    if (frameBefore != null && frameAfter != null) {
+      final beforeMs = frameBefore['timestamp_ms'] as int;
+      final afterMs = frameAfter['timestamp_ms'] as int;
 
-    // Fallback auf Linear Interpolation wenn nicht genug Frames
-    if (frame1 == null || frame2 == null) {
-      return;
-    }
+      // Interpolationsfaktor (0.0 = frameBefore, 1.0 = frameAfter)
+      final double t;
+      if (afterMs == beforeMs) {
+        t = 0.0;
+      } else {
+        t = ((currentMs - beforeMs) / (afterMs - beforeMs)).clamp(0.0, 1.0);
+      }
 
-    final t1 = (frame1['timestamp_ms'] as int).toDouble();
-    final t2 = (frame2['timestamp_ms'] as int).toDouble();
+      // Interpoliere alle Golf-Keypoints
+      const keypointNames = [
+        'left_shoulder',
+        'right_shoulder',
+        'left_elbow',
+        'right_elbow',
+        'left_wrist',
+        'right_wrist',
+        'left_hip',
+        'right_hip',
+        'left_knee',
+        'right_knee',
+      ];
 
-    if (t2 == t1) {
-      return;
-    }
+      final interpolatedKeypoints = <String, Offset?>{};
 
-    // Normalisierter Interpolationsfaktor (0..1 zwischen frame1 und frame2)
-    final double t = ((currentMs - t1) / (t2 - t1)).clamp(0.0, 1.0);
+      for (final name in keypointNames) {
+        final beforeKp = frameBefore['keypoints']?[name];
+        final afterKp = frameAfter['keypoints']?[name];
 
-    // Interpoliere alle Golf-Keypoints mit Cubic (Catmull-Rom)
-    const keypointNames = [
-      'left_shoulder',
-      'right_shoulder',
-      'left_elbow',
-      'right_elbow',
-      'left_wrist',
-      'right_wrist',
-      'left_hip',
-      'right_hip',
-      'left_knee',
-      'right_knee',
-    ];
+        if (beforeKp != null && afterKp != null) {
+          final x = (beforeKp['x'] as double) * (1 - t) +
+              (afterKp['x'] as double) * t;
+          final y = (beforeKp['y'] as double) * (1 - t) +
+              (afterKp['y'] as double) * t;
 
-    final interpolatedKeypoints = <String, Offset?>{};
-
-    for (final name in keypointNames) {
-      final kp1 = frame1['keypoints']?[name];
-      final kp2 = frame2['keypoints']?[name];
-
-      if (kp1 != null && kp2 != null) {
-        double x, y;
-
-        // Wenn wir 4 Punkte haben, nutze Catmull-Rom Spline
-        if (frame0 != null && frame3 != null) {
-          final kp0 = frame0['keypoints']?[name];
-          final kp3 = frame3['keypoints']?[name];
-
-          if (kp0 != null && kp3 != null) {
-            // Catmull-Rom Spline Interpolation
-            x = _catmullRom(
-              kp0['x'] as double,
-              kp1['x'] as double,
-              kp2['x'] as double,
-              kp3['x'] as double,
-              t,
-            );
-            y = _catmullRom(
-              kp0['y'] as double,
-              kp1['y'] as double,
-              kp2['y'] as double,
-              kp3['y'] as double,
-              t,
-            );
-          } else {
-            // Fallback: Linear
-            x = (kp1['x'] as double) * (1 - t) + (kp2['x'] as double) * t;
-            y = (kp1['y'] as double) * (1 - t) + (kp2['y'] as double) * t;
-          }
-        } else {
-          // Fallback: Linear
-          x = (kp1['x'] as double) * (1 - t) + (kp2['x'] as double) * t;
-          y = (kp1['y'] as double) * (1 - t) + (kp2['y'] as double) * t;
+          interpolatedKeypoints[name] =
+              Offset(x * videoSize.width, y * videoSize.height);
         }
-
-        interpolatedKeypoints[name] =
-            Offset(x * videoSize.width, y * videoSize.height);
       }
+
+      // Wende Smoothing an (optional, aber empfohlen)
+      _applySmoothingToKeypoints(interpolatedKeypoints);
+
+      setState(() {
+        _allKeypoints = _smoothedKeypoints.isNotEmpty
+            ? Map.from(_smoothedKeypoints)
+            : interpolatedKeypoints;
+        _shoulderMissCount = 0;
+
+        // Backward compatibility: Setze auch einzelne Marker
+        _leftShoulderMarker = _allKeypoints!['left_shoulder'];
+        _rightShoulderMarker = _allKeypoints!['right_shoulder'];
+      });
+    } else if (frameBefore != null) {
+      // Nur ein Frame vorhanden, nutze diesen direkt
+      final keypoints = frameBefore['keypoints'];
+      final interpolatedKeypoints = <String, Offset?>{};
+
+      const keypointNames = [
+        'left_shoulder',
+        'right_shoulder',
+        'left_elbow',
+        'right_elbow',
+        'left_wrist',
+        'right_wrist',
+        'left_hip',
+        'right_hip',
+        'left_knee',
+        'right_knee',
+      ];
+
+      for (final name in keypointNames) {
+        final kp = keypoints?[name];
+        if (kp != null) {
+          interpolatedKeypoints[name] = Offset(
+            (kp['x'] as double) * videoSize.width,
+            (kp['y'] as double) * videoSize.height,
+          );
+        }
+      }
+
+      setState(() {
+        _allKeypoints = interpolatedKeypoints;
+        _shoulderMissCount = 0;
+
+        // Backward compatibility
+        _leftShoulderMarker = interpolatedKeypoints['left_shoulder'];
+        _rightShoulderMarker = interpolatedKeypoints['right_shoulder'];
+      });
     }
-
-    // Smoothing anwenden
-    _applySmoothingToKeypoints(interpolatedKeypoints);
-
-    setState(() {
-      _allKeypoints = _smoothedKeypoints;
-      _shoulderMissCount = 0;
-
-      // Backward compatibility: Setze auch Schulter-Marker
-      _leftShoulderMarker = _smoothedKeypoints['left_shoulder'];
-      _rightShoulderMarker = _smoothedKeypoints['right_shoulder'];
-    });
-  }
-
-  /// Catmull-Rom Spline Interpolation (smooth curves)
-  double _catmullRom(double p0, double p1, double p2, double p3, double t) {
-    final t2 = t * t;
-    final t3 = t2 * t;
-
-    return 0.5 *
-        ((2 * p1) +
-            (-p0 + p2) * t +
-            (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-            (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
   }
 
   /// Predictive Smoothing für flüssigere Bewegung
