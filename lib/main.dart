@@ -4,14 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:ui' as ui;
-// 'dart:typed_data' is provided transitively via flutter/foundation
+import 'dart:typed_data';
 import 'package:flutter/rendering.dart';
 import 'dart:math' as math;
 import 'dart:convert';
 import 'dart:async';
-// MoveNet / TFLite
 import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
 import 'package:flutter/foundation.dart';
+
+// Services
+import 'services/swing_comparison.dart';
+import 'screens/swing_comparison_screen.dart';
 
 // Simple singleton manager for MoveNet interpreter so it can be initialized from
 // different screens (camera recording start or review screen) without duplicating code.
@@ -185,13 +188,29 @@ class _CropPainter extends CustomPainter {
 }
 
 // Painter for persistent shoulder markers
-// Painter für animierte Schulter-Marker mit Smooth-Bewegung
+// Painter für Körperteil-Marker mit Smooth-Bewegung
 class _ShoulderMarkerPainter extends CustomPainter {
   final Offset? left;
   final Offset? right;
+  final Offset? leftHip;
+  final Offset? rightHip;
+  final Offset? leftKnee;
+  final Offset? rightKnee;
+  final Offset? leftElbow;
+  final Offset? rightElbow;
   final Size? imageSize;
   
-  _ShoulderMarkerPainter({this.left, this.right, this.imageSize});
+  _ShoulderMarkerPainter({
+    this.left, 
+    this.right, 
+    this.leftHip, 
+    this.rightHip, 
+    this.leftKnee, 
+    this.rightKnee, 
+    this.leftElbow, 
+    this.rightElbow, 
+    this.imageSize
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -206,6 +225,12 @@ class _ShoulderMarkerPainter extends CustomPainter {
     
     final double radius = 10.0; // Etwas größer für bessere Sichtbarkeit
     
+    // Text-Painter für Beschriftungen
+    final textPainter = TextPainter(
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    );
+    
     if (left != null && imageSize != null) {
       final double sx = size.width / imageSize!.width;
       final double sy = size.height / imageSize!.height;
@@ -216,6 +241,24 @@ class _ShoulderMarkerPainter extends CustomPainter {
       canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
       // Innerer roter Punkt
       canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      // "LS" Beschriftung über der linken Schulter
+      textPainter.text = TextSpan(
+        text: 'LS',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [
+            Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2),
+          ],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4),
+      );
     }
     
     if (right != null && imageSize != null) {
@@ -228,12 +271,171 @@ class _ShoulderMarkerPainter extends CustomPainter {
       canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
       // Innerer roter Punkt
       canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      // "RS" Beschriftung über der rechten Schulter
+      textPainter.text = TextSpan(
+        text: 'RS',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [
+            Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2),
+          ],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4),
+      );
+    }
+    
+    // Linke Hüfte
+    if (leftHip != null && imageSize != null) {
+      final double sx = size.width / imageSize!.width;
+      final double sy = size.height / imageSize!.height;
+      final dx = leftHip!.dx * sx;
+      final dy = leftHip!.dy * sy;
+      
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      textPainter.text = TextSpan(
+        text: 'LH',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2)],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4));
+    }
+    
+    // Rechte Hüfte
+    if (rightHip != null && imageSize != null) {
+      final double sx = size.width / imageSize!.width;
+      final double sy = size.height / imageSize!.height;
+      final dx = rightHip!.dx * sx;
+      final dy = rightHip!.dy * sy;
+      
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      textPainter.text = TextSpan(
+        text: 'RH',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2)],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4));
+    }
+    
+    // Linkes Knie
+    if (leftKnee != null && imageSize != null) {
+      final double sx = size.width / imageSize!.width;
+      final double sy = size.height / imageSize!.height;
+      final dx = leftKnee!.dx * sx;
+      final dy = leftKnee!.dy * sy;
+      
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      textPainter.text = TextSpan(
+        text: 'LK',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2)],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4));
+    }
+    
+    // Rechtes Knie
+    if (rightKnee != null && imageSize != null) {
+      final double sx = size.width / imageSize!.width;
+      final double sy = size.height / imageSize!.height;
+      final dx = rightKnee!.dx * sx;
+      final dy = rightKnee!.dy * sy;
+      
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      textPainter.text = TextSpan(
+        text: 'RK',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2)],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4));
+    }
+    
+    // Linker Ellenbogen
+    if (leftElbow != null && imageSize != null) {
+      final double sx = size.width / imageSize!.width;
+      final double sy = size.height / imageSize!.height;
+      final dx = leftElbow!.dx * sx;
+      final dy = leftElbow!.dy * sy;
+      
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      textPainter.text = TextSpan(
+        text: 'LE',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2)],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4));
+    }
+    
+    // Rechter Ellenbogen
+    if (rightElbow != null && imageSize != null) {
+      final double sx = size.width / imageSize!.width;
+      final double sy = size.height / imageSize!.height;
+      final dx = rightElbow!.dx * sx;
+      final dy = rightElbow!.dy * sy;
+      
+      canvas.drawCircle(Offset(dx, dy), radius, strokePaint);
+      canvas.drawCircle(Offset(dx, dy), radius - 2, paint);
+      
+      textPainter.text = TextSpan(
+        text: 'RE',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          shadows: [Shadow(color: Colors.black, offset: Offset(1, 1), blurRadius: 2)],
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(dx - textPainter.width / 2, dy - radius - textPainter.height - 4));
     }
   }
 
   @override
   bool shouldRepaint(covariant _ShoulderMarkerPainter old) => 
-    old.left != left || old.right != right || old.imageSize != imageSize;
+    old.left != left || old.right != right || old.leftHip != leftHip || 
+    old.rightHip != rightHip || old.leftKnee != leftKnee || 
+    old.rightKnee != rightKnee || old.leftElbow != leftElbow || 
+    old.rightElbow != rightElbow || old.imageSize != imageSize;
 }
 
 // Top-level isolate helper: center-crop -> bilinear resize -> normalize
@@ -348,6 +550,12 @@ class CameraSmokeTestApp extends StatelessWidget {
   // stored as pixel coordinates relative to last captured image
   Offset? _leftShoulderMarker;
   Offset? _rightShoulderMarker;
+  Offset? _leftHipMarker;
+  Offset? _rightHipMarker;
+  Offset? _leftKneeMarker;
+  Offset? _rightKneeMarker;
+  Offset? _leftElbowMarker;
+  Offset? _rightElbowMarker;
   int _shoulderMissCount = 0;
   final int _maxShoulderMiss = 6; // hide after this many misses
   Timer? _shoulderTrackingTimer;
@@ -434,38 +642,49 @@ class CameraSmokeTestApp extends StatelessWidget {
           t = ((currentMs - beforeMs) / (afterMs - beforeMs)).clamp(0.0, 1.0);
         }
         
-        // Interpoliere linke Schulter
-        final leftBefore = frameBefore['left'] as Map<String, dynamic>;
-        final leftAfter = frameAfter['left'] as Map<String, dynamic>;
-        final leftX = (leftBefore['x'] as double) * (1 - t) + (leftAfter['x'] as double) * t;
-        final leftY = (leftBefore['y'] as double) * (1 - t) + (leftAfter['y'] as double) * t;
-        
-        // Interpoliere rechte Schulter
-        final rightBefore = frameBefore['right'] as Map<String, dynamic>;
-        final rightAfter = frameAfter['right'] as Map<String, dynamic>;
-        final rightX = (rightBefore['x'] as double) * (1 - t) + (rightAfter['x'] as double) * t;
-        final rightY = (rightBefore['y'] as double) * (1 - t) + (rightAfter['y'] as double) * t;
+        // Hilfsfunktion für Interpolation
+        Offset interpolatePoint(String key) {
+          final before = frameBefore![key] as Map<String, dynamic>;
+          final after = frameAfter![key] as Map<String, dynamic>;
+          final x = (before['x'] as double) * (1 - t) + (after['x'] as double) * t;
+          final y = (before['y'] as double) * (1 - t) + (after['y'] as double) * t;
+          return Offset(x * videoSize.width, y * videoSize.height);
+        }
         
         setState(() {
-          _leftShoulderMarker = Offset(leftX * videoSize.width, leftY * videoSize.height);
-          _rightShoulderMarker = Offset(rightX * videoSize.width, rightY * videoSize.height);
+          _leftShoulderMarker = interpolatePoint('left');
+          _rightShoulderMarker = interpolatePoint('right');
+          if (frameBefore?.containsKey('leftHip') ?? false) _leftHipMarker = interpolatePoint('leftHip');
+          if (frameBefore?.containsKey('rightHip') ?? false) _rightHipMarker = interpolatePoint('rightHip');
+          if (frameBefore?.containsKey('leftKnee') ?? false) _leftKneeMarker = interpolatePoint('leftKnee');
+          if (frameBefore?.containsKey('rightKnee') ?? false) _rightKneeMarker = interpolatePoint('rightKnee');
+          if (frameBefore?.containsKey('leftElbow') ?? false) _leftElbowMarker = interpolatePoint('leftElbow');
+          if (frameBefore?.containsKey('rightElbow') ?? false) _rightElbowMarker = interpolatePoint('rightElbow');
           _shoulderMissCount = 0;
         });
       } 
       // Falls nur ein Frame vorhanden, verwende den
       else if (frameBefore != null) {
-        final left = frameBefore['left'] as Map<String, dynamic>;
-        final right = frameBefore['right'] as Map<String, dynamic>;
+        // Hilfsfunktion für direktes Mapping
+        Offset? mapPoint(String key) {
+          if (!(frameBefore?.containsKey(key) ?? false)) return null;
+          final point = frameBefore?[key] as Map<String, dynamic>?;
+          if (point == null) return null;
+          return Offset(
+            (point['x'] as double) * videoSize.width,
+            (point['y'] as double) * videoSize.height,
+          );
+        }
         
         setState(() {
-          _leftShoulderMarker = Offset(
-            (left['x'] as double) * videoSize.width,
-            (left['y'] as double) * videoSize.height,
-          );
-          _rightShoulderMarker = Offset(
-            (right['x'] as double) * videoSize.width,
-            (right['y'] as double) * videoSize.height,
-          );
+          _leftShoulderMarker = mapPoint('left');
+          _rightShoulderMarker = mapPoint('right');
+          _leftHipMarker = mapPoint('leftHip');
+          _rightHipMarker = mapPoint('rightHip');
+          _leftKneeMarker = mapPoint('leftKnee');
+          _rightKneeMarker = mapPoint('rightKnee');
+          _leftElbowMarker = mapPoint('leftElbow');
+          _rightElbowMarker = mapPoint('rightElbow');
           _shoulderMissCount = 0;
         });
       }
@@ -1387,11 +1606,24 @@ class CameraSmokeTestApp extends StatelessWidget {
                                 painter: KeypointsPainter(keypoints: _lastKeypoints!, minScore: _minKeypointScore, imageSize: _lastCapturedImageSize ?? Size(ctrl.value.size.width, ctrl.value.size.height)),
                               ),
                             ),
-                          // Persistent shoulder markers
-                          if (_leftShoulderMarker != null || _rightShoulderMarker != null)
+                          // Persistent body markers
+                          if (_leftShoulderMarker != null || _rightShoulderMarker != null || 
+                              _leftHipMarker != null || _rightHipMarker != null ||
+                              _leftKneeMarker != null || _rightKneeMarker != null ||
+                              _leftElbowMarker != null || _rightElbowMarker != null)
                             Positioned.fill(
                               child: CustomPaint(
-                                painter: _ShoulderMarkerPainter(left: _leftShoulderMarker, right: _rightShoulderMarker, imageSize: _lastCapturedImageSize ?? Size(ctrl.value.size.width, ctrl.value.size.height)),
+                                painter: _ShoulderMarkerPainter(
+                                  left: _leftShoulderMarker, 
+                                  right: _rightShoulderMarker,
+                                  leftHip: _leftHipMarker,
+                                  rightHip: _rightHipMarker,
+                                  leftKnee: _leftKneeMarker,
+                                  rightKnee: _rightKneeMarker,
+                                  leftElbow: _leftElbowMarker,
+                                  rightElbow: _rightElbowMarker,
+                                  imageSize: _lastCapturedImageSize ?? Size(ctrl.value.size.width, ctrl.value.size.height)
+                                ),
                               ),
                             ),
                           // Crop debug overlay
@@ -1470,6 +1702,44 @@ class CameraSmokeTestApp extends StatelessWidget {
                                     },
                             ),
                           ),
+                          // Vergleich mit Profi Button
+                          Positioned(
+                            bottom: 80,
+                            right: 12,
+                            child: FloatingActionButton.extended(
+                              heroTag: 'compare_pro',
+                              backgroundColor: Colors.purple,
+                              icon: const Icon(Icons.compare_arrows),
+                              label: const Text('Vergleich'),
+                              onPressed: () async {
+                                // Prüfe ob Pose-Daten existieren
+                                final poseJsonPath = widget.videoPath.replaceAll('.mp4', '_pose_data.json');
+                                final file = File(poseJsonPath);
+                                
+                                if (await file.exists()) {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => SwingComparisonScreen(
+                                        userVideoPath: widget.videoPath,
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: const Text('Bitte zuerst Video mit MediaPipe analysieren'),
+                                      action: SnackBarAction(
+                                        label: 'Analysieren',
+                                        onPressed: () async {
+                                          await _analyzeVideoAndSaveShoulders(widget.videoPath);
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1543,142 +1813,156 @@ class CameraSmokeTestApp extends StatelessWidget {
                     ),
                   ),
 
-                  // Checklist area
+                  // Checklist area mit MoveNet Controls und Buttons (alles scrollbar)
                   Expanded(
-                    child: Padding(
+                    child: SingleChildScrollView(
                       padding: const EdgeInsets.all(12.0),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Markiere, was du in diesem Swing erkennst', style: TextStyle(color: Colors.white70)),
-                            const SizedBox(height: 8),
-                            Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: Column(
-                                  children: Issue.values.map((issue) {
-                                    return CheckboxListTile(
-                                      value: _selected.contains(issue),
-                                      onChanged: (v) {
-                                        setState(() {
-                                          if (v == true) {
-                                            _selected.add(issue);
-                                          } else {
-                                            _selected.remove(issue);
-                                          }
-                                        });
-                                      },
-                                      title: Text(issueTitle(issue)),
-                                      dense: true,
-                                      controlAffinity: ListTileControlAffinity.leading,
-                                    );
-                                  }).toList(),
-                                ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('Markiere, was du in diesem Swing erkennst', style: TextStyle(color: Colors.white70)),
+                          const SizedBox(height: 8),
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Column(
+                                children: Issue.values.map((issue) {
+                                  return CheckboxListTile(
+                                    value: _selected.contains(issue),
+                                    onChanged: (v) {
+                                      setState(() {
+                                        if (v == true) {
+                                          _selected.add(issue);
+                                        } else {
+                                          _selected.remove(issue);
+                                        }
+                                      });
+                                    },
+                                    title: Text(issueTitle(issue)),
+                                    dense: true,
+                                    controlAffinity: ListTileControlAffinity.leading,
+                                  );
+                                }).toList(),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // MoveNet controls + export
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Column(
-                          children: [
-                                    Row(
-                                      children: [
-                                        const Text('Center-crop for MoveNet', style: TextStyle(fontWeight: FontWeight.w600)),
-                                        const Spacer(),
-                                        Switch(value: _centerCropEnabled, onChanged: (v) {
-                                          setState(() { _centerCropEnabled = v; });
-                                        }),
-                                      ],
-                                    ),
-                            Row(
-                              children: [
-                                const Text('Use MoveNet', style: TextStyle(fontWeight: FontWeight.w600)),
-                                const Spacer(),
-                                Switch(
-                                  value: _useMoveNet,
-                                  onChanged: (v) {
-                                    setState(() {
-                                      _useMoveNet = v;
-                                    });
-                                  },
-                                ),
-                              ],
+                          ),
+                          const SizedBox(height: 12),
+                          // MoveNet controls + export
+                          Card(
+                            color: Colors.blueGrey.shade900,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('🎯 MoveNet Einstellungen', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      const Text('Center-crop for MoveNet'),
+                                      const Spacer(),
+                                      Switch(value: _centerCropEnabled, onChanged: (v) {
+                                        setState(() { _centerCropEnabled = v; });
+                                      }),
+                                    ],
+                                  ),
+                                  Row(
+                                    children: [
+                                      const Text('Use MoveNet'),
+                                      const Spacer(),
+                                      Switch(
+                                        value: _useMoveNet,
+                                        onChanged: (v) {
+                                          setState(() {
+                                            _useMoveNet = v;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  const Divider(color: Colors.white24),
+                                  const Text('Keypoint Sichtbarkeit', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      const Text('Min Score:'),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Slider(
+                                          value: _minKeypointScore,
+                                          min: 0.0,
+                                          max: 1.0,
+                                          divisions: 20,
+                                          label: _minKeypointScore.toStringAsFixed(2),
+                                          onChanged: (v) {
+                                            setState(() { _minKeypointScore = v; });
+                                          },
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 40,
+                                        child: Text(_minKeypointScore.toStringAsFixed(2), 
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                          textAlign: TextAlign.right,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        onPressed: (_lastKeypoints == null && _detectedLines.isEmpty) ? null : () async {
+                                          await _exportLastResults();
+                                        },
+                                        icon: const Icon(Icons.download, size: 18),
+                                        label: const Text('Export JSON'),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      ElevatedButton.icon(
+                                        onPressed: _analysisRunning ? null : () async {
+                                          await _dumpDebugJson();
+                                        },
+                                        icon: const Icon(Icons.bug_report, size: 18),
+                                        label: const Text('Debug'),
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrangeAccent),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
-                            Row(
+                          ),
+                          const SizedBox(height: 16),
+                          // Save / Discard Buttons (innerhalb ScrollView)
+                          SafeArea(
+                            top: false,
+                            child: Row(
                               children: [
-                                const Text('Min keypoint score'),
-                                const SizedBox(width: 12),
                                 Expanded(
-                                  child: Slider(
-                                    value: _minKeypointScore,
-                                    min: 0.0,
-                                    max: 1.0,
-                                    divisions: 20,
-                                    label: _minKeypointScore.toStringAsFixed(2),
-                                    onChanged: (v) {
-                                      setState(() { _minKeypointScore = v; });
-                                    },
+                                  child: OutlinedButton(
+                                    onPressed: () => Navigator.of(context).pop<Set<Issue>>(<Issue>{}),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                    ),
+                                    child: const Text('Verwerfen', style: TextStyle(fontSize: 16)),
                                   ),
                                 ),
-                                Text(_minKeypointScore.toStringAsFixed(2)),
-                              ],
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                ElevatedButton.icon(
-                                  onPressed: (_lastKeypoints == null && _detectedLines.isEmpty) ? null : () async {
-                                    await _exportLastResults();
-                                  },
-                                  icon: const Icon(Icons.download),
-                                  label: const Text('Export JSON'),
-                                ),
-                                const SizedBox(width: 8),
-                                ElevatedButton.icon(
-                                  onPressed: _analysisRunning ? null : () async {
-                                    await _dumpDebugJson();
-                                  },
-                                  icon: const Icon(Icons.bug_report),
-                                  label: const Text('Dump Debug'),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrangeAccent),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: () => Navigator.of(context).pop<Set<Issue>>(_selected),
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(vertical: 16),
+                                    ),
+                                    child: const Text('Speichern', style: TextStyle(fontSize: 16)),
+                                  ),
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Save / Discard row
-                  SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => Navigator.of(context).pop<Set<Issue>>(<Issue>{}),
-                              child: const Text('Verwerfen'),
-                            ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: () => Navigator.of(context).pop<Set<Issue>>(_selected),
-                              child: const Text('Speichern'),
-                            ),
-                          ),
+                          const SizedBox(height: 12),
                         ],
                       ),
                     ),
@@ -1687,7 +1971,218 @@ class CameraSmokeTestApp extends StatelessWidget {
               ),
       );
     }
+  
+
+  // MoveNet Video-Analyse Methode
+  Future<void> _analyzeVideoAndSaveShoulders(String videoPath) async {
+    try {
+      if (!mounted) return;
+      
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Analysiere mit MoveNet...'),
+              SizedBox(height: 8),
+              Text('17 Keypoints pro Frame', style: TextStyle(fontSize: 12, color: Colors.white70)),
+            ],
+          ),
+        ),
+      );
+
+      await MoveNetManager.init();
+      if (MoveNetManager.interpreter == null) {
+        throw Exception('MoveNet konnte nicht geladen werden');
+      }
+      
+      final tempController = VideoPlayerController.file(File(videoPath));
+      await tempController.initialize();
+      await tempController.pause();
+      
+      List<Map<String, dynamic>> poseData = [];
+      final duration = tempController.value.duration;
+      final videoWidth = tempController.value.size.width.toInt();
+      final videoHeight = tempController.value.size.height.toInt();
+      
+      if (kDebugMode) debugPrint('Video: ${videoWidth}x${videoHeight}, ${duration.inMilliseconds}ms');
+      
+      final GlobalKey repaintKey = GlobalKey();
+      OverlayEntry? overlayEntry;
+      
+      overlayEntry = OverlayEntry(
+        builder: (context) => Positioned(
+          left: -10000,
+          top: -10000,
+          child: RepaintBoundary(
+            key: repaintKey,
+            child: SizedBox(
+              width: videoWidth.toDouble(),
+              height: videoHeight.toDouble(),
+              child: VideoPlayer(tempController),
+            ),
+          ),
+        ),
+      );
+      
+      Overlay.of(context).insert(overlayEntry);
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Frame-by-Frame mit MoveNet
+      int frameCount = 0;
+      const keypointNames = [
+        'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
+        'left_shoulder', 'right_shoulder',
+        'left_elbow', 'right_elbow',
+        'left_wrist', 'right_wrist',
+        'left_hip', 'right_hip',
+        'left_knee', 'right_knee',
+        'left_ankle', 'right_ankle',
+      ];
+      
+      for (int ms = 0; ms < duration.inMilliseconds; ms += 50) {
+        try {
+          await tempController.seekTo(Duration(milliseconds: ms));
+          await Future.delayed(const Duration(milliseconds: 100));
+          
+          final renderObj = repaintKey.currentContext?.findRenderObject();
+          if (renderObj is! RenderRepaintBoundary) continue;
+          
+          final boundary = renderObj;
+          final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
+          final byteData = await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+          
+          if (byteData == null) continue;
+          
+          final rgba = byteData.buffer.asUint8List();
+          final w = captured.width;
+          final h = captured.height;
+          
+          // MoveNet Inferenz
+          final cropData = _prepareMoveNetInput(rgba, w, h, centerCrop: true, targetSize: 192);
+          final inputImage = cropData['image'] as List;
+          final cropMeta = cropData['crop'] as Map<String, int>;
+          
+          // Konvertiere zu Uint8List für TFLite
+          final Uint8List uint8Input = Uint8List(192 * 192 * 3);
+          int idx = 0;
+          for (int y = 0; y < 192; y++) {
+            for (int x = 0; x < 192; x++) {
+              for (int c = 0; c < 3; c++) {
+                uint8Input[idx++] = (inputImage[y][x][c] * 255).round().clamp(0, 255);
+              }
+            }
+          }
+          
+          final input = uint8Input.buffer.asUint8List().reshape([1, 192, 192, 3]);
+          final output = List.generate(1, (_) => List.generate(1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
+          MoveNetManager.interpreter!.run(input, output);
+          
+          final rawOut = output[0][0];
+          final cropX = cropMeta['x']!;
+          final cropY = cropMeta['y']!;
+          final cropW = cropMeta['w']!;
+          final cropH = cropMeta['h']!;
+          
+          // Remap Keypoints
+          final keypoints = <String, Map<String, double>>{};
+          
+          for (int i = 0; i < 17; i++) {
+            final y = (rawOut[i][0] as double).clamp(0.0, 1.0);
+            final x = (rawOut[i][1] as double).clamp(0.0, 1.0);
+            final score = (rawOut[i][2] as double).clamp(0.0, 1.0);
+            
+            final double origX = (cropX + x * cropW) / w;
+            final double origY = (cropY + y * cropH) / h;
+            
+            keypoints[keypointNames[i]] = {
+              'x': origX,
+              'y': origY,
+              'score': score,
+            };
+          }
+          
+          // Speichere wenn Schultern sichtbar
+          final leftShoulder = keypoints['left_shoulder']!;
+          final rightShoulder = keypoints['right_shoulder']!;
+          
+          if (leftShoulder['score']! >= 0.3 && rightShoulder['score']! >= 0.3) {
+            poseData.add({
+              'timestamp_ms': ms,
+              'keypoints': keypoints,
+            });
+            frameCount++;
+            
+            if (kDebugMode && frameCount % 20 == 0) {
+              debugPrint('Analyzed $frameCount frames...');
+            }
+          }
+          
+          captured.dispose();
+        } catch (e) {
+          if (kDebugMode) debugPrint('Frame error at ${ms}ms: $e');
+        }
+      }
+      
+      overlayEntry.remove();
+      await tempController.dispose();
+      
+      // Speichere MoveNet-Pose-Daten
+      if (poseData.isNotEmpty) {
+        final jsonPath = videoPath.replaceAll('.mp4', '_movenet_pose.json');
+        await File(jsonPath).writeAsString(jsonEncode({
+          'model': 'MoveNet Lightning',
+          'keypoint_count': 17,
+          'video_path': videoPath,
+          'analyzed_at': DateTime.now().toIso8601String(),
+          'frame_count': frameCount,
+          'frames': poseData,
+        }));
+        
+        // Schultern für Backward-Compatibility
+        final shoulderData = poseData.map((frame) {
+          final kp = frame['keypoints'];
+          return {
+            'timestamp_ms': frame['timestamp_ms'],
+            'left': {
+              'x': kp['left_shoulder']['x'],
+              'y': kp['left_shoulder']['y'],
+            },
+            'right': {
+              'x': kp['right_shoulder']['x'],
+              'y': kp['right_shoulder']['y'],
+            },
+          };
+        }).toList();
+        
+        final shoulderJsonPath = videoPath.replaceAll('.mp4', '_shoulders.json');
+        await File(shoulderJsonPath).writeAsString(jsonEncode(shoulderData));
+        
+        if (kDebugMode) debugPrint('Saved $frameCount MoveNet pose frames');
+      } else {
+        if (kDebugMode) debugPrint('Keine Pose mit MoveNet erkannt!');
+      }
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('MoveNet-Analyse fehlgeschlagen: $e');
+      if (mounted) {
+        try {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Analyse fehlgeschlagen: $e')),
+          );
+        } catch (_) {}
+      }
+    }
   }
+}
 
 class CameraSmokeTestScreen extends StatefulWidget {
   const CameraSmokeTestScreen({super.key});
@@ -1935,9 +2430,9 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
             children: [
               CircularProgressIndicator(),
               SizedBox(height: 16),
-              Text('Analysiere Video...'),
+              Text('Analysiere mit MoveNet...'),
               SizedBox(height: 8),
-              Text('Bitte warten...', style: TextStyle(fontSize: 12, color: Colors.white70)),
+              Text('17 Keypoints werden erkannt', style: TextStyle(fontSize: 12, color: Colors.white70)),
             ],
           ),
         ),
@@ -1945,31 +2440,26 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
 
       // MoveNet initialisieren
       await MoveNetManager.init();
-      if (MoveNetManager.interpreter == null) {
-        throw Exception('MoveNet konnte nicht geladen werden');
-      }
       
-      // Video-Controller für Frame-Extraktion
+      // Video-Controller
       final tempController = VideoPlayerController.file(File(videoPath));
       await tempController.initialize();
       await tempController.pause();
       
-      List<Map<String, dynamic>> shoulderData = [];
+      List<Map<String, dynamic>> poseData = [];
       final duration = tempController.value.duration;
       final videoWidth = tempController.value.size.width.toInt();
       final videoHeight = tempController.value.size.height.toInt();
       
       if (kDebugMode) debugPrint('Video: ${videoWidth}x${videoHeight}, ${duration.inMilliseconds}ms');
       
-      // Erstelle temporären Widget für Frame-Capture
-      // Wir müssen einen Overlay-Widget erstellen, um Frames zu capturen
+      // Overlay für Frame-Capture
       final GlobalKey repaintKey = GlobalKey();
-      
-      // Overlay-Entry erstellen
       OverlayEntry? overlayEntry;
+      
       overlayEntry = OverlayEntry(
         builder: (context) => Positioned(
-          left: -10000, // Außerhalb des sichtbaren Bereichs
+          left: -10000,
           top: -10000,
           child: RepaintBoundary(
             key: repaintKey,
@@ -1983,51 +2473,41 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       );
       
       Overlay.of(context).insert(overlayEntry);
-      
-      // Warte kurz, damit der Widget-Tree aufgebaut wird
       await Future.delayed(Duration(milliseconds: 500));
       
-      // Frame-by-Frame Analyse (alle 50ms = 20fps)
+      // Frame-by-Frame Analyse mit MoveNet (alle 50ms)
       int frameCount = 0;
       for (int ms = 0; ms < duration.inMilliseconds; ms += 50) {
         try {
-          // Seek zu diesem Frame
           await tempController.seekTo(Duration(milliseconds: ms));
-          await Future.delayed(Duration(milliseconds: 100)); // Frame laden lassen
+          await Future.delayed(Duration(milliseconds: 100));
           
           // Capture Frame
           final renderObj = repaintKey.currentContext?.findRenderObject();
-          if (renderObj is! RenderRepaintBoundary) {
-            if (kDebugMode) debugPrint('RenderRepaintBoundary nicht gefunden bei ${ms}ms');
-            continue;
-          }
+          if (renderObj is! RenderRepaintBoundary) continue;
           
-          final boundary = renderObj as RenderRepaintBoundary;
+          final boundary = renderObj;
           final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
           final byteData = await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
           
-          if (byteData == null) {
-            if (kDebugMode) debugPrint('ByteData null bei ${ms}ms');
-            continue;
-          }
+          if (byteData == null) continue;
           
           final rgba = byteData.buffer.asUint8List();
           final w = captured.width;
           final h = captured.height;
           
-          // MoveNet-Inferenz
-          final prep = await compute(_resizeNormalize, {'rgba': rgba, 'w': w, 'h': h, 'size': 192, 'centerCrop': true});
-          final inputImage = prep['image'] as List;
-          final cropMeta = prep['crop'] as Map<String, dynamic>;
+          // MoveNet Inferenz
+          final cropData = _prepareMoveNetInput(rgba, w, h, centerCrop: true, targetSize: 192);
+          final inputImage = cropData['image'] as List;
+          final cropMeta = cropData['crop'] as Map<String, int>;
           
-          // Konvertiere zu Uint8List
+          // Konvertiere zu Uint8List für TFLite
           final Uint8List uint8Input = Uint8List(192 * 192 * 3);
           int idx = 0;
-          final image3d = inputImage as List<List<List<double>>>;
-          for (int ty = 0; ty < 192; ty++) {
-            for (int tx = 0; tx < 192; tx++) {
+          for (int y = 0; y < 192; y++) {
+            for (int x = 0; x < 192; x++) {
               for (int c = 0; c < 3; c++) {
-                uint8Input[idx++] = (image3d[ty][tx][c] * 255).round().clamp(0, 255);
+                uint8Input[idx++] = (inputImage[y][x][c] * 255).round().clamp(0, 255);
               }
             }
           }
@@ -2037,42 +2517,58 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
           MoveNetManager.interpreter!.run(input, output);
           
           final rawOut = output[0][0];
-          final cropX = cropMeta['x'] as int;
-          final cropY = cropMeta['y'] as int;
-          final cropW = cropMeta['w'] as int;
-          final cropH = cropMeta['h'] as int;
+          final cropX = cropMeta['x']!;
+          final cropY = cropMeta['y']!;
+          final cropW = cropMeta['w']!;
+          final cropH = cropMeta['h']!;
           
-          // Remap Keypoints zu Original-Koordinaten
-          List<Map<String, double>> keypoints = [];
+          // Remap Keypoints
+          const keypointNames = [
+            'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
+            'left_shoulder', 'right_shoulder',
+            'left_elbow', 'right_elbow',
+            'left_wrist', 'right_wrist',
+            'left_hip', 'right_hip',
+            'left_knee', 'right_knee',
+            'left_ankle', 'right_ankle',
+          ];
+          
+          final keypoints = <String, Map<String, double>>{};
+          
           for (int i = 0; i < 17; i++) {
             final y = (rawOut[i][0] as double).clamp(0.0, 1.0);
             final x = (rawOut[i][1] as double).clamp(0.0, 1.0);
             final score = (rawOut[i][2] as double).clamp(0.0, 1.0);
             
-            // Remap von Crop zu Original
             final double origX = (cropX + x * cropW) / w;
             final double origY = (cropY + y * cropH) / h;
             
-            keypoints.add({'x': origX, 'y': origY, 'score': score});
+            keypoints[keypointNames[i]] = {
+              'x': origX,
+              'y': origY,
+              'score': score,
+            };
           }
           
-          // Extrahiere Schultern (Index 5 = left shoulder, 6 = right shoulder)
-          final leftShoulder = keypoints[5];
-          final rightShoulder = keypoints[6];
+          // Speichere wenn Schultern sichtbar
+          final leftShoulder = keypoints['left_shoulder']!;
+          final rightShoulder = keypoints['right_shoulder']!;
           
-          // Speichere nur wenn Score hoch genug
           if (leftShoulder['score']! >= 0.3 && rightShoulder['score']! >= 0.3) {
-            shoulderData.add({
+            poseData.add({
               'timestamp_ms': ms,
-              'left': {'x': leftShoulder['x'], 'y': leftShoulder['y']},
-              'right': {'x': rightShoulder['x'], 'y': rightShoulder['y']},
+              'keypoints': keypoints,
             });
             frameCount++;
+            
+            if (kDebugMode && frameCount % 10 == 0) {
+              debugPrint('Analyzed $frameCount frames...');
+            }
           }
           
           captured.dispose();
         } catch (e) {
-          if (kDebugMode) debugPrint('Frame-Analyse fehlgeschlagen bei ${ms}ms: $e');
+          if (kDebugMode) debugPrint('Frame error at ${ms}ms: $e');
         }
       }
       
@@ -2080,20 +2576,46 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       overlayEntry.remove();
       await tempController.dispose();
       
-      // JSON-Datei speichern
-      if (shoulderData.isNotEmpty) {
-        final jsonPath = videoPath.replaceAll('.mp4', '_shoulders.json');
-        await File(jsonPath).writeAsString(jsonEncode(shoulderData));
-        if (kDebugMode) debugPrint('Saved $frameCount shoulder positions to $jsonPath');
+      // Speichere vollständige Pose-Daten
+      if (poseData.isNotEmpty) {
+        final jsonPath = videoPath.replaceAll('.mp4', '_movenet_pose.json');
+        await File(jsonPath).writeAsString(jsonEncode({
+          'video_path': videoPath,
+          'analyzed_at': DateTime.now().toIso8601String(),
+          'frame_count': frameCount,
+          'model': 'MoveNet Lightning',
+          'frames': poseData,
+        }));
+        
+        // Extrahiere Schultern für Backward-Compatibility
+        final shoulderData = poseData.map((frame) {
+          final kp = frame['keypoints'];
+          return {
+            'timestamp_ms': frame['timestamp_ms'],
+            'left': {
+              'x': kp['left_shoulder']['x'],
+              'y': kp['left_shoulder']['y'],
+            },
+            'right': {
+              'x': kp['right_shoulder']['x'],
+              'y': kp['right_shoulder']['y'],
+            },
+          };
+        }).toList();
+        
+        final shoulderJsonPath = videoPath.replaceAll('.mp4', '_shoulders.json');
+        await File(shoulderJsonPath).writeAsString(jsonEncode(shoulderData));
+        
+        if (kDebugMode) debugPrint('Saved $frameCount pose frames to JSON');
       } else {
-        if (kDebugMode) debugPrint('Keine Schultern erkannt!');
+        if (kDebugMode) debugPrint('Keine Pose erkannt!');
       }
       
       if (mounted) {
-        Navigator.of(context).pop(); // Dialog schließen
+        Navigator.of(context).pop();
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('Video-Analyse fehlgeschlagen: $e');
+      if (kDebugMode) debugPrint('Analyse fehlgeschlagen: $e');
       if (mounted) {
         try {
           Navigator.of(context).pop();
@@ -2104,6 +2626,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       }
     }
   }
+  
 
   Future<void> _selectCamera(CameraDescription cam) async {
     await _controller?.dispose();
@@ -2290,4 +2813,52 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       ),
     );
   }
+}
+
+// ========== MoveNet Hilfsmethoden (Top-Level) ==========
+
+/// Bereitet RGBA-Bild für MoveNet vor (192x192, center crop, normalisiert)
+Map<String, dynamic> _prepareMoveNetInput(
+  Uint8List rgba,
+  int width,
+  int height, {
+  bool centerCrop = true,
+  int targetSize = 192,
+}) {
+  // Center Crop Berechnung
+  int cropX = 0, cropY = 0, cropW = width, cropH = height;
+  
+  if (centerCrop) {
+    if (width > height) {
+      cropW = height;
+      cropX = (width - height) ~/ 2;
+    } else {
+      cropH = width;
+      cropY = (height - width) ~/ 2;
+    }
+  }
+  
+  // Resize zu targetSize x targetSize und normalisiere
+  final resized = List.generate(
+    targetSize,
+    (y) => List.generate(
+      targetSize,
+      (x) {
+        final srcX = cropX + (x * cropW / targetSize).floor();
+        final srcY = cropY + (y * cropH / targetSize).floor();
+        final idx = (srcY * width + srcX) * 4;
+        
+        return [
+          rgba[idx] / 255.0,     // R
+          rgba[idx + 1] / 255.0, // G
+          rgba[idx + 2] / 255.0, // B
+        ];
+      },
+    ),
+  );
+  
+  return {
+    'image': resized,
+    'crop': {'x': cropX, 'y': cropY, 'w': cropW, 'h': cropH},
+  };
 }

@@ -28,3 +28,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/movenet_singlepose_lightning.tflite
+    - assets/pro_swings/sample_pro.json
