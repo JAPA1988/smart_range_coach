@@ -588,13 +588,23 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   void _updateAllKeypointsFromPrecomputed() {
     if (_precomputedShoulders == null ||
         _controller == null ||
-        _precomputedShoulders!.isEmpty) return;
+        _precomputedShoulders!.isEmpty) {
+      if (kDebugMode) debugPrint('⚠️ No pose frames available');
+      return;
+    }
 
     final currentMs = _controller!.value.position.inMilliseconds;
     final renderStartTime = DateTime.now().millisecondsSinceEpoch;
 
     // ✨ PREDICTIVE LEADING: Kompensiere Render-Latenz
     final predictedMs = _latencyCompensator.getCompensatedTime(currentMs);
+
+    // Debug nur alle 60 Frames
+    _frameCounter++;
+    if (kDebugMode && _frameCounter % 60 == 0) {
+      debugPrint(
+          '🎬 Current: ${currentMs}ms, Predicted: ${predictedMs}ms, Total frames: ${_precomputedShoulders!.length}');
+    }
 
     final videoSize = _lastCapturedImageSize ??
         Size(_controller!.value.size.width, _controller!.value.size.height);
@@ -616,6 +626,24 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       }
     }
 
+    // Wenn am Anfang: nutze ersten Frame
+    if (predictedMs < (_precomputedShoulders!.first['timestamp_ms'] as int)) {
+      if (kDebugMode && _frameCounter % 60 == 0) {
+        debugPrint('⏮️ Using first frame');
+      }
+      frameBefore = _precomputedShoulders!.first;
+      frameAfter = null;
+    }
+
+    // Wenn am Ende: nutze letzten Frame
+    if (predictedMs > (_precomputedShoulders!.last['timestamp_ms'] as int)) {
+      if (kDebugMode && _frameCounter % 60 == 0) {
+        debugPrint('⏭️ Using last frame');
+      }
+      frameBefore = _precomputedShoulders!.last;
+      frameAfter = null;
+    }
+
     // Falls wir zwei Frames haben, interpoliere zwischen ihnen
     if (frameBefore != null && frameAfter != null) {
       final beforeMs = frameBefore['timestamp_ms'] as int;
@@ -628,6 +656,11 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         t = 0.0;
       } else {
         t = ((predictedMs - beforeMs) / (afterMs - beforeMs)).clamp(0.0, 1.0);
+      }
+
+      if (kDebugMode && _frameCounter % 60 == 0) {
+        debugPrint(
+            '🔄 Interpolating: ${beforeMs}ms -> ${afterMs}ms (t=${t.toStringAsFixed(2)})');
       }
 
       // Nutze Helper-Methode für saubere Interpolation
@@ -651,8 +684,16 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         _leftShoulderMarker = _allKeypoints!['left_shoulder'];
         _rightShoulderMarker = _allKeypoints!['right_shoulder'];
       });
+
+      // Messe Latenz für adaptive Kompensation
+      final renderEndTime = DateTime.now().millisecondsSinceEpoch;
+      _latencyCompensator.measureLatency(currentMs, renderEndTime);
     } else if (frameBefore != null) {
       // Nur ein Frame vorhanden, nutze diesen direkt
+      if (kDebugMode && _frameCounter % 60 == 0) {
+        debugPrint('🎯 Exact match at ${frameBefore['timestamp_ms']}ms');
+      }
+
       final keypoints = frameBefore['keypoints'];
       final interpolatedKeypoints = <String, Offset?>{};
 
@@ -687,6 +728,58 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         _leftShoulderMarker = interpolatedKeypoints['left_shoulder'];
         _rightShoulderMarker = interpolatedKeypoints['right_shoulder'];
       });
+    } else {
+      // Fallback: Finde nächsten verfügbaren Frame
+      if (kDebugMode && _frameCounter % 60 == 0) {
+        debugPrint('🔍 Fallback: Finding nearest frame');
+      }
+
+      Map<String, dynamic>? nearest;
+      int minDiff = 999999;
+
+      for (final frame in _precomputedShoulders!) {
+        final frameMs = frame['timestamp_ms'] as int;
+        final diff = (frameMs - predictedMs).abs();
+        if (diff < minDiff) {
+          minDiff = diff;
+          nearest = frame;
+        }
+      }
+
+      if (nearest != null) {
+        final keypoints = nearest['keypoints'];
+        final interpolatedKeypoints = <String, Offset?>{};
+
+        const keypointNames = [
+          'left_shoulder',
+          'right_shoulder',
+          'left_elbow',
+          'right_elbow',
+          'left_wrist',
+          'right_wrist',
+          'left_hip',
+          'right_hip',
+          'left_knee',
+          'right_knee',
+        ];
+
+        for (final name in keypointNames) {
+          final kp = keypoints?[name];
+          if (kp != null) {
+            interpolatedKeypoints[name] = Offset(
+              (kp['x'] as double) * videoSize.width,
+              (kp['y'] as double) * videoSize.height,
+            );
+          }
+        }
+
+        setState(() {
+          _allKeypoints = interpolatedKeypoints;
+          _shoulderMissCount = 0;
+          _leftShoulderMarker = interpolatedKeypoints['left_shoulder'];
+          _rightShoulderMarker = interpolatedKeypoints['right_shoulder'];
+        });
+      }
     }
   }
 
