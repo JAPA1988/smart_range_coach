@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart';
 // Services
 import 'services/swing_comparison.dart';
 import 'screens/swing_comparison_screen.dart';
+// import 'services/video_frame_extractor.dart'; // FFmpeg-basiert - nicht mehr verwendet
 
 // Golf-Schwung-Phasen
 enum SwingPhase {
@@ -141,6 +142,85 @@ class MoveNetManager {
       interpreter?.close();
     } catch (_) {}
     interpreter = null;
+  }
+
+  /// Analysiert RGBA-Bilddaten mit MoveNet und gibt Keypoints zurück
+  static Future<Map<String, dynamic>?> analyzePoseFromRGBA(
+    Uint8List rgba,
+    int width,
+    int height,
+  ) async {
+    if (interpreter == null) return null;
+
+    try {
+      // Konvertiere RGBA zu normalisierten Float-Werten (0.0-1.0)
+      final input = Uint8List(192 * 192 * 3);
+      int idx = 0;
+
+      for (int y = 0; y < 192; y++) {
+        for (int x = 0; x < 192; x++) {
+          // Bilinear sampling für Resize
+          final srcX = (x * width / 192).floor();
+          final srcY = (y * height / 192).floor();
+          final srcIdx = (srcY * width + srcX) * 4;
+
+          input[idx++] = rgba[srcIdx]; // R
+          input[idx++] = rgba[srcIdx + 1]; // G
+          input[idx++] = rgba[srcIdx + 2]; // B
+        }
+      }
+
+      // Reshape zu [1, 192, 192, 3]
+      final inputReshaped =
+          input.buffer.asUint8List().reshape([1, 192, 192, 3]);
+      final output = List.generate(
+          1,
+          (_) => List.generate(
+              1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
+
+      interpreter!.run(inputReshaped, output);
+
+      // Parse Keypoints
+      const keypointNames = [
+        'nose',
+        'left_eye',
+        'right_eye',
+        'left_ear',
+        'right_ear',
+        'left_shoulder',
+        'right_shoulder',
+        'left_elbow',
+        'right_elbow',
+        'left_wrist',
+        'right_wrist',
+        'left_hip',
+        'right_hip',
+        'left_knee',
+        'right_knee',
+        'left_ankle',
+        'right_ankle',
+      ];
+
+      final keypoints = <String, Map<String, double>>{};
+      final rawOut = output[0][0];
+
+      for (int i = 0; i < 17; i++) {
+        final y = (rawOut[i][0] as double).clamp(0.0, 1.0);
+        final x = (rawOut[i][1] as double).clamp(0.0, 1.0);
+        final score = (rawOut[i][2] as double).clamp(0.0, 1.0);
+
+        keypoints[keypointNames[i]] = {
+          'x': x,
+          'y': y,
+          'score': score,
+        };
+      }
+
+      return {'keypoints': keypoints};
+    } catch (e) {
+      if (kDebugMode) debugPrint('MoveNet analysis error: $e');
+      return null;
+    }
   }
 }
 
@@ -2366,7 +2446,180 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   }
 
   // MoveNet Video-Analyse Methode mit adaptivem Multi-Threading
+  // MoveNet Video-Analyse Methode (FFmpeg-basiert für Performance)
   Future<void> _analyzeVideoAndSaveShoulders(String videoPath) async {
+    try {
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('🎬 Analysiere mit MoveNet...'),
+            ],
+          ),
+        ),
+      );
+
+      await MoveNetManager.init();
+      if (MoveNetManager.interpreter == null) {
+        throw Exception('MoveNet konnte nicht geladen werden');
+      }
+
+      final tempController = VideoPlayerController.file(File(videoPath));
+      await tempController.initialize();
+      await tempController.pause();
+
+      final duration = tempController.value.duration;
+      final videoWidth = tempController.value.size.width.toInt();
+      final videoHeight = tempController.value.size.height.toInt();
+
+      // Overlay für Frame-Capture
+      final GlobalKey repaintKey = GlobalKey();
+      OverlayEntry? overlayEntry = OverlayEntry(
+        builder: (context) => Positioned(
+          left: -10000,
+          top: -10000,
+          child: RepaintBoundary(
+            key: repaintKey,
+            child: SizedBox(
+              width: videoWidth.toDouble(),
+              height: videoHeight.toDouble(),
+              child: VideoPlayer(tempController),
+            ),
+          ),
+        ),
+      );
+
+      Overlay.of(context).insert(overlayEntry);
+      await Future.delayed(Duration(milliseconds: 500));
+
+      List<Map<String, dynamic>> poseData = [];
+
+      final estimatedFps = 15; // ← Von 120 auf 15!
+      final frameIntervalMs = (1000 / estimatedFps).round();
+      final totalMs = duration.inMilliseconds;
+      final totalFrames = (totalMs / frameIntervalMs).ceil();
+
+      if (kDebugMode) {
+        debugPrint('🎬 Video: ${videoWidth}x${videoHeight}, ${totalMs}ms');
+        debugPrint('📊 Analyzing: $estimatedFps fps → $totalFrames frames');
+      }
+
+      for (int frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+        try {
+          final currentMs = frameIndex * frameIntervalMs;
+          if (currentMs >= totalMs) break;
+
+          await tempController.seekTo(Duration(milliseconds: currentMs));
+          await Future.delayed(Duration(milliseconds: 50));
+
+          final boundary = repaintKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+          if (boundary == null) continue;
+
+          final image = await boundary.toImage(pixelRatio: 1.0);
+          final byteData =
+              await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+          if (byteData == null) continue;
+
+          final rgba = byteData.buffer.asUint8List();
+
+          final result = await MoveNetManager.analyzePoseFromRGBA(
+            rgba,
+            videoWidth,
+            videoHeight,
+          );
+
+          if (result != null && result['keypoints'] != null) {
+            final keypoints = result['keypoints'] as Map<String, dynamic>;
+            final leftShoulder = keypoints['left_shoulder'];
+            final rightShoulder = keypoints['right_shoulder'];
+
+            if (leftShoulder != null &&
+                rightShoulder != null &&
+                leftShoulder['score'] >= 0.3 &&
+                rightShoulder['score'] >= 0.3) {
+              poseData.add({
+                'timestamp_ms': currentMs,
+                'frame_index': frameIndex,
+                'fps_used': estimatedFps,
+                'keypoints': keypoints,
+              });
+            }
+          }
+
+          if (kDebugMode && frameIndex % 30 == 0) {
+            debugPrint(
+                '📊 Frame $frameIndex/$totalFrames (${(frameIndex / totalFrames * 100).toStringAsFixed(0)}%)');
+          }
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ Frame $frameIndex error: $e');
+        }
+      }
+
+      overlayEntry?.remove();
+      await tempController.dispose();
+
+      if (poseData.isNotEmpty) {
+        final jsonPath = videoPath.replaceAll('.mp4', '_movenet_pose.json');
+        await File(jsonPath).writeAsString(jsonEncode({
+          'model': 'MoveNet Lightning',
+          'analyzed_at': DateTime.now().toIso8601String(),
+          'frame_count': poseData.length,
+          'analysis_method': 'overlay_simple',
+          'frames': poseData,
+        }));
+
+        final shoulderData = poseData.map((frame) {
+          final kp = frame['keypoints'];
+          return {
+            'timestamp_ms': frame['timestamp_ms'],
+            'left': {
+              'x': kp['left_shoulder']['x'],
+              'y': kp['left_shoulder']['y'],
+            },
+            'right': {
+              'x': kp['right_shoulder']['x'],
+              'y': kp['right_shoulder']['y'],
+            },
+          };
+        }).toList();
+
+        final shoulderJsonPath =
+            videoPath.replaceAll('.mp4', '_shoulders.json');
+        await File(shoulderJsonPath).writeAsString(jsonEncode(shoulderData));
+
+        if (kDebugMode) {
+          debugPrint(
+              '✅ Saved ${poseData.length} pose frames at $estimatedFps fps');
+        }
+      }
+
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('❌ Analyse fehlgeschlagen: $e');
+      if (mounted) {
+        try {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Analyse fehlgeschlagen: $e')),
+          );
+        } catch (_) {}
+      }
+    }
+  }
+
+  // Original Multi-Threading Analyse (für Vergleich/Fallback)
+  Future<void> _analyzeVideoAndSaveShoulders_MultiThreaded(
+      String videoPath) async {
     try {
       if (!mounted) return;
 
@@ -3290,7 +3543,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
 
       // Frame-by-Frame Analyse mit MoveNet (120fps = 8.33ms)
       int frameCount = 0;
-      final estimatedFps = 120;
+      final estimatedFps = 15; // 8x weniger Frames = 5-8x schneller!
       final msPerFrame = 1000 / estimatedFps;
 
       if (kDebugMode)
