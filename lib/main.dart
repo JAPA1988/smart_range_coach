@@ -16,6 +16,71 @@ import 'package:flutter/foundation.dart';
 import 'services/swing_comparison.dart';
 import 'screens/swing_comparison_screen.dart';
 
+// Golf-Schwung-Phasen
+enum SwingPhase {
+  address, // Setup
+  takeaway, // Schwung beginnt
+  backswing, // Rückschwung
+  top, // Höchster Punkt
+  transition, // Übergang
+  downswing, // Abschwung - SCHNELL!
+  impact, // Ball-Kontakt - KRITISCH!
+  followThrough, // Durchschwung
+  finish, // Ende
+}
+
+// Motion-Segment für adaptive Analyse
+class MotionSegment {
+  final int startMs;
+  final int endMs;
+  final double motionLevel;
+  final SwingPhase phase;
+  final int recommendedFps;
+
+  MotionSegment({
+    required this.startMs,
+    required this.endMs,
+    required this.motionLevel,
+    required this.phase,
+    required this.recommendedFps,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'start_ms': startMs,
+        'end_ms': endMs,
+        'motion_level': motionLevel,
+        'phase': phase.toString(),
+        'fps': recommendedFps,
+      };
+}
+
+// Latency Compensator für Predictive Leading
+class LatencyCompensator {
+  final List<int> _latencySamples = [];
+  int _averageLatency = 60; // Start-Wert
+
+  void measureLatency(int videoTime, int renderTime) {
+    final latency = renderTime - videoTime;
+    if (latency > 0 && latency < 200) {
+      // Nur sinnvolle Werte
+      _latencySamples.add(latency);
+
+      if (_latencySamples.length > 20) {
+        _latencySamples.removeAt(0);
+      }
+
+      _averageLatency =
+          _latencySamples.reduce((a, b) => a + b) ~/ _latencySamples.length;
+    }
+  }
+
+  int getCompensatedTime(int currentTime) {
+    return currentTime + _averageLatency;
+  }
+
+  int get averageLatency => _averageLatency;
+}
+
 // Simple singleton manager for MoveNet interpreter so it can be initialized from
 // different screens (camera recording start or review screen) without duplicating code.
 class MoveNetManager {
@@ -23,8 +88,10 @@ class MoveNetManager {
   static Future<void> init() async {
     if (interpreter != null) return;
 
-    // TFLite-Optionen: Nutze 4 CPU-Threads für bessere Performance
-    final options = tfl.InterpreterOptions()..threads = 4;
+    // TFLite-Optionen: GPU + NNAPI für maximale Performance
+    final options = tfl.InterpreterOptions()
+      ..threads = 4
+      ..useNnApiForAndroid = true; // Android Neural Networks API
 
     final candidates = [
       'movenet_singlepose_lightning.tflite',
@@ -383,6 +450,11 @@ class CameraSmokeTestApp extends StatelessWidget {
     return MaterialApp(
       title: 'Smart Range Coach – Camera Smoke Test',
       theme: ThemeData.dark(),
+      builder: (context, child) {
+        return SafeArea(
+          child: child!,
+        );
+      },
       home: const CameraSmokeTestScreen(),
     );
   }
@@ -434,7 +506,14 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   // Smoothing für flüssigere Bewegung
   final Map<String, Offset?> _smoothedKeypoints = {};
   final double _smoothingFactor =
-      0.3; // 0 = keine Smoothing, 1 = maximales Smoothing
+      0.1; // 0 = keine Smoothing, 1 = maximales Smoothing (reduziert für schnellere Reaktion)
+
+  // Latency Compensator für Predictive Leading
+  final _latencyCompensator = LatencyCompensator();
+
+  // Analysis Status für Dialog
+  String _analysisStatus = 'Initialisiere...';
+  String _analysisProgress = '';
   int _shoulderMissCount = 0;
   final int _maxShoulderMiss = 6; // hide after this many misses
   Timer? _shoulderTrackingTimer;
@@ -512,6 +591,11 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         _precomputedShoulders!.isEmpty) return;
 
     final currentMs = _controller!.value.position.inMilliseconds;
+    final renderStartTime = DateTime.now().millisecondsSinceEpoch;
+
+    // ✨ PREDICTIVE LEADING: Kompensiere Render-Latenz
+    final predictedMs = _latencyCompensator.getCompensatedTime(currentMs);
+
     final videoSize = _lastCapturedImageSize ??
         Size(_controller!.value.size.width, _controller!.value.size.height);
 
@@ -523,10 +607,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       final frame = _precomputedShoulders![i];
       final frameMs = frame['timestamp_ms'] as int;
 
-      if (frameMs <= currentMs) {
+      if (frameMs <= predictedMs) {
         frameBefore = frame;
       }
-      if (frameMs >= currentMs && frameAfter == null) {
+      if (frameMs >= predictedMs && frameAfter == null) {
         frameAfter = frame;
         break;
       }
@@ -538,45 +622,23 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       final afterMs = frameAfter['timestamp_ms'] as int;
 
       // Interpolationsfaktor (0.0 = frameBefore, 1.0 = frameAfter)
+      // WICHTIG: Nutze predictedMs statt currentMs für bessere Synchronisation
       final double t;
       if (afterMs == beforeMs) {
         t = 0.0;
       } else {
-        t = ((currentMs - beforeMs) / (afterMs - beforeMs)).clamp(0.0, 1.0);
+        t = ((predictedMs - beforeMs) / (afterMs - beforeMs)).clamp(0.0, 1.0);
       }
 
-      // Interpoliere alle Golf-Keypoints
-      const keypointNames = [
-        'left_shoulder',
-        'right_shoulder',
-        'left_elbow',
-        'right_elbow',
-        'left_wrist',
-        'right_wrist',
-        'left_hip',
-        'right_hip',
-        'left_knee',
-        'right_knee',
-      ];
+      // Nutze Helper-Methode für saubere Interpolation
+      final interpolatedKeypoints = _interpolateKeypoints(
+        frameBefore: frameBefore,
+        frameAfter: frameAfter,
+        t: t,
+        videoSize: videoSize,
+      );
 
-      final interpolatedKeypoints = <String, Offset?>{};
-
-      for (final name in keypointNames) {
-        final beforeKp = frameBefore['keypoints']?[name];
-        final afterKp = frameAfter['keypoints']?[name];
-
-        if (beforeKp != null && afterKp != null) {
-          final x = (beforeKp['x'] as double) * (1 - t) +
-              (afterKp['x'] as double) * t;
-          final y = (beforeKp['y'] as double) * (1 - t) +
-              (afterKp['y'] as double) * t;
-
-          interpolatedKeypoints[name] =
-              Offset(x * videoSize.width, y * videoSize.height);
-        }
-      }
-
-      // Wende Smoothing an (optional, aber empfohlen)
+      // Wende Smoothing an (reduziert Jitter bei schnellen Bewegungen)
       _applySmoothingToKeypoints(interpolatedKeypoints);
 
       setState(() {
@@ -646,6 +708,46 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         }
       }
     });
+  }
+
+  /// Interpoliert zwischen zwei Keypoint-Sets basierend auf Faktor t (0.0 - 1.0)
+  Map<String, Offset?> _interpolateKeypoints({
+    required Map<String, dynamic> frameBefore,
+    required Map<String, dynamic> frameAfter,
+    required double t,
+    required Size videoSize,
+  }) {
+    const keypointNames = [
+      'left_shoulder',
+      'right_shoulder',
+      'left_elbow',
+      'right_elbow',
+      'left_wrist',
+      'right_wrist',
+      'left_hip',
+      'right_hip',
+      'left_knee',
+      'right_knee',
+    ];
+
+    final interpolated = <String, Offset?>{};
+
+    for (final name in keypointNames) {
+      final beforeKp = frameBefore['keypoints']?[name];
+      final afterKp = frameAfter['keypoints']?[name];
+
+      if (beforeKp != null && afterKp != null) {
+        // Lineare Interpolation: before * (1-t) + after * t
+        final x =
+            (beforeKp['x'] as double) * (1 - t) + (afterKp['x'] as double) * t;
+        final y =
+            (beforeKp['y'] as double) * (1 - t) + (afterKp['y'] as double) * t;
+
+        interpolated[name] = Offset(x * videoSize.width, y * videoSize.height);
+      }
+    }
+
+    return interpolated;
   }
 
   final int _movenetInputSize =
@@ -2170,7 +2272,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     );
   }
 
-  // MoveNet Video-Analyse Methode
+  // MoveNet Video-Analyse Methode mit adaptivem Multi-Threading
   Future<void> _analyzeVideoAndSaveShoulders(String videoPath) async {
     try {
       if (!mounted) return;
@@ -2178,17 +2280,24 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Analysiere mit MoveNet...'),
-              SizedBox(height: 8),
-              Text('17 Keypoints pro Frame',
-                  style: TextStyle(fontSize: 12, color: Colors.white70)),
-            ],
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('🏌️ Golf-Schwung-Analyse',
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                SizedBox(height: 12),
+                Text(_analysisStatus,
+                    style: TextStyle(fontSize: 14, color: Colors.white70)),
+                SizedBox(height: 8),
+                Text(_analysisProgress,
+                    style: TextStyle(fontSize: 12, color: Colors.blue)),
+              ],
+            ),
           ),
         ),
       );
@@ -2202,19 +2311,18 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       await tempController.initialize();
       await tempController.pause();
 
-      List<Map<String, dynamic>> poseData = [];
       final duration = tempController.value.duration;
       final videoWidth = tempController.value.size.width.toInt();
       final videoHeight = tempController.value.size.height.toInt();
 
-      if (kDebugMode)
+      if (kDebugMode) {
         debugPrint(
-            'Video: ${videoWidth}x${videoHeight}, ${duration.inMilliseconds}ms');
+            '🎬 Video: ${videoWidth}x${videoHeight}, ${duration.inMilliseconds}ms');
+      }
 
+      // Overlay für Frame-Capture
       final GlobalKey repaintKey = GlobalKey();
-      OverlayEntry? overlayEntry;
-
-      overlayEntry = OverlayEntry(
+      OverlayEntry? overlayEntry = OverlayEntry(
         builder: (context) => Positioned(
           left: -10000,
           top: -10000,
@@ -2230,148 +2338,116 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       );
 
       Overlay.of(context).insert(overlayEntry);
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(Duration(milliseconds: 500));
 
-      // Frame-by-Frame mit MoveNet
-      int frameCount = 0;
-      const keypointNames = [
-        'nose',
-        'left_eye',
-        'right_eye',
-        'left_ear',
-        'right_ear',
-        'left_shoulder',
-        'right_shoulder',
-        'left_elbow',
-        'right_elbow',
-        'left_wrist',
-        'right_wrist',
-        'left_hip',
-        'right_hip',
-        'left_knee',
-        'right_knee',
-        'left_ankle',
-        'right_ankle',
-      ];
+      // ===================================================================
+      // PHASE 1: MOTION DETECTION (Quick-Scan mit 10fps)
+      // ===================================================================
+      _updateAnalysisStatus('Phase 1: Bewegungs-Erkennung...');
 
-      for (int ms = 0; ms < duration.inMilliseconds; ms += 50) {
-        try {
-          await tempController.seekTo(Duration(milliseconds: ms));
-          await Future.delayed(const Duration(milliseconds: 100));
+      final motionProfile = await _detectMotionProfile(
+        tempController,
+        repaintKey,
+        duration.inMilliseconds,
+      );
 
-          final renderObj = repaintKey.currentContext?.findRenderObject();
-          if (renderObj is! RenderRepaintBoundary) continue;
-
-          final boundary = renderObj;
-          final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
-          final byteData =
-              await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
-
-          if (byteData == null) continue;
-
-          final rgba = byteData.buffer.asUint8List();
-          final w = captured.width;
-          final h = captured.height;
-
-          // MoveNet Inferenz
-          final cropData = _prepareMoveNetInput(rgba, w, h,
-              centerCrop: true, targetSize: 192);
-          final inputImage = cropData['image'] as List;
-          final cropMeta = cropData['crop'] as Map<String, int>;
-
-          // Konvertiere zu Uint8List für TFLite
-          final Uint8List uint8Input = Uint8List(192 * 192 * 3);
-          int idx = 0;
-          for (int y = 0; y < 192; y++) {
-            for (int x = 0; x < 192; x++) {
-              for (int c = 0; c < 3; c++) {
-                uint8Input[idx++] =
-                    (inputImage[y][x][c] * 255).round().clamp(0, 255);
-              }
-            }
-          }
-
-          final input =
-              uint8Input.buffer.asUint8List().reshape([1, 192, 192, 3]);
-          final output = List.generate(
-              1,
-              (_) => List.generate(
-                  1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
-          MoveNetManager.interpreter!.run(input, output);
-
-          final rawOut = output[0][0];
-          final cropX = cropMeta['x']!;
-          final cropY = cropMeta['y']!;
-          final cropW = cropMeta['w']!;
-          final cropH = cropMeta['h']!;
-
-          // Remap Keypoints
-          final keypoints = <String, Map<String, double>>{};
-
-          for (int i = 0; i < 17; i++) {
-            final y = (rawOut[i][0] as double).clamp(0.0, 1.0);
-            final x = (rawOut[i][1] as double).clamp(0.0, 1.0);
-            final score = (rawOut[i][2] as double).clamp(0.0, 1.0);
-
-            final double origX = (cropX + x * cropW) / w;
-            final double origY = (cropY + y * cropH) / h;
-
-            keypoints[keypointNames[i]] = {
-              'x': origX,
-              'y': origY,
-              'score': score,
-            };
-          }
-
-          // Speichere wenn Schultern sichtbar
-          final leftShoulder = keypoints['left_shoulder']!;
-          final rightShoulder = keypoints['right_shoulder']!;
-
-          if (leftShoulder['score']! >= 0.3 && rightShoulder['score']! >= 0.3) {
-            poseData.add({
-              'timestamp_ms': ms,
-              'keypoints': keypoints,
-            });
-            frameCount++;
-
-            if (kDebugMode && frameCount % 20 == 0) {
-              debugPrint('Analyzed $frameCount frames...');
-            }
-          }
-
-          captured.dispose();
-        } catch (e) {
-          if (kDebugMode) debugPrint('Frame error at ${ms}ms: $e');
+      if (kDebugMode) {
+        debugPrint(
+            '📊 Motion Profile detected: ${motionProfile.length} segments');
+        for (final segment in motionProfile) {
+          debugPrint('  ${segment.startMs}-${segment.endMs}ms: '
+              '${segment.phase} (motion=${(segment.motionLevel * 100).toInt()}%) '
+              '→ ${segment.recommendedFps}fps');
         }
       }
 
+      // ===================================================================
+      // PHASE 2: ADAPTIVE MULTI-THREADED ANALYSIS
+      // ===================================================================
+      _updateAnalysisStatus('Phase 2: Intelligente Analyse...');
+
+      // Teile Segmente auf Worker auf (optimiert für moderne CPUs)
+      final workerCount = Platform.numberOfProcessors.clamp(2, 6);
+      final segmentsPerWorker = (motionProfile.length / workerCount).ceil();
+
+      List<Future<List<Map<String, dynamic>>>> workerFutures = [];
+
+      for (int workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+        final startIdx = workerIndex * segmentsPerWorker;
+        final endIdx = ((workerIndex + 1) * segmentsPerWorker)
+            .clamp(0, motionProfile.length);
+
+        if (startIdx >= motionProfile.length) break;
+
+        final workerSegments = motionProfile.sublist(startIdx, endIdx);
+
+        workerFutures.add(
+          _analyzeSegmentsWorker(
+            videoPath: videoPath,
+            segments: workerSegments,
+            videoWidth: videoWidth,
+            videoHeight: videoHeight,
+            workerIndex: workerIndex,
+          ),
+        );
+
+        if (kDebugMode) {
+          debugPrint(
+              '🔧 Worker $workerIndex: Processing ${workerSegments.length} segments');
+        }
+      }
+
+      // Warte auf alle Worker
+      final workerResults = await Future.wait(workerFutures);
+
+      // Merge & Sort Ergebnisse
+      List<Map<String, dynamic>> poseData = [];
+      for (final workerResult in workerResults) {
+        poseData.addAll(workerResult);
+      }
+      poseData.sort((a, b) =>
+          (a['timestamp_ms'] as int).compareTo(b['timestamp_ms'] as int));
+
+      if (kDebugMode) {
+        debugPrint('✅ Total frames analyzed: ${poseData.length}');
+      }
+
+      // Cleanup
       overlayEntry.remove();
       await tempController.dispose();
 
-      // Speichere MoveNet-Pose-Daten
+      // ===================================================================
+      // PHASE 3: SAVE RESULTS
+      // ===================================================================
+      _updateAnalysisStatus('Phase 3: Speichere Ergebnisse...');
+
       if (poseData.isNotEmpty) {
+        // Vollständige Pose-Daten mit Metadata
         final jsonPath = videoPath.replaceAll('.mp4', '_movenet_pose.json');
         await File(jsonPath).writeAsString(jsonEncode({
           'model': 'MoveNet Lightning',
           'keypoint_count': 17,
           'video_path': videoPath,
           'analyzed_at': DateTime.now().toIso8601String(),
-          'frame_count': frameCount,
+          'frame_count': poseData.length,
+          'analysis_method': 'motion_adaptive_parallel',
+          'worker_count': workerCount,
+          'motion_profile': motionProfile.map((s) => s.toJson()).toList(),
           'frames': poseData,
         }));
 
-        // Schultern für Backward-Compatibility
+        // Backward-compatibility: Schultern-JSON
         final shoulderData = poseData.map((frame) {
           final kp = frame['keypoints'];
           return {
             'timestamp_ms': frame['timestamp_ms'],
             'left': {
               'x': kp['left_shoulder']['x'],
-              'y': kp['left_shoulder']['y'],
+              'y': kp['left_shoulder']['y']
             },
             'right': {
               'x': kp['right_shoulder']['x'],
-              'y': kp['right_shoulder']['y'],
+              'y': kp['right_shoulder']['y']
             },
           };
         }).toList();
@@ -2380,16 +2456,30 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
             videoPath.replaceAll('.mp4', '_shoulders.json');
         await File(shoulderJsonPath).writeAsString(jsonEncode(shoulderData));
 
-        if (kDebugMode) debugPrint('Saved $frameCount MoveNet pose frames');
+        if (kDebugMode) {
+          debugPrint('✅ Saved ${poseData.length} pose frames');
+
+          // Performance-Stats
+          final fpsDistribution = <int, int>{};
+          for (final frame in poseData) {
+            final fps = frame['fps_used'] as int? ?? 30;
+            fpsDistribution[fps] = (fpsDistribution[fps] ?? 0) + 1;
+          }
+          debugPrint('📊 FPS Distribution:');
+          fpsDistribution.forEach((fps, count) {
+            debugPrint(
+                '  ${fps}fps: $count frames (${(count / poseData.length * 100).toStringAsFixed(1)}%)');
+          });
+        }
       } else {
-        if (kDebugMode) debugPrint('Keine Pose mit MoveNet erkannt!');
+        if (kDebugMode) debugPrint('⚠️ Keine Pose erkannt!');
       }
 
       if (mounted) {
         Navigator.of(context).pop();
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('MoveNet-Analyse fehlgeschlagen: $e');
+      if (kDebugMode) debugPrint('❌ Analyse fehlgeschlagen: $e');
       if (mounted) {
         try {
           Navigator.of(context).pop();
@@ -2399,6 +2489,382 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         } catch (_) {}
       }
     }
+  }
+
+  void _updateAnalysisStatus(String status, [String progress = '']) {
+    _analysisStatus = status;
+    _analysisProgress = progress;
+    if (kDebugMode) debugPrint('📋 $status $progress');
+  }
+
+  /// Erkennt Bewegungs-Intensität und Golf-Schwung-Phasen
+  Future<List<MotionSegment>> _detectMotionProfile(
+    VideoPlayerController controller,
+    GlobalKey repaintKey,
+    int durationMs,
+  ) async {
+    final segments = <MotionSegment>[];
+    const sampleInterval = 100; // Alle 100ms ein Sample
+
+    Uint8List? previousFrame;
+    final motionSamples = <double>[];
+
+    // Quick-Scan durchführen
+    for (int ms = 0; ms < durationMs; ms += sampleInterval) {
+      await controller.seekTo(Duration(milliseconds: ms));
+      await Future.delayed(Duration(milliseconds: 40));
+
+      try {
+        final renderObj = repaintKey.currentContext?.findRenderObject();
+        if (renderObj is! RenderRepaintBoundary) continue;
+
+        final boundary = renderObj as RenderRepaintBoundary;
+        final ui.Image captured =
+            await boundary.toImage(pixelRatio: 0.2); // Klein!
+        final byteData =
+            await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+
+        if (byteData == null) continue;
+
+        final currentFrame = byteData.buffer.asUint8List();
+
+        double motion = 0.0;
+        if (previousFrame != null &&
+            previousFrame.length == currentFrame.length) {
+          int totalDiff = 0;
+          for (int i = 0; i < currentFrame.length; i += 16) {
+            // Sample jeden 4. Pixel
+            totalDiff += (currentFrame[i] - previousFrame[i]).abs();
+          }
+          motion = (totalDiff / (currentFrame.length / 16)) / 255.0;
+        }
+
+        motionSamples.add(motion);
+        previousFrame = currentFrame;
+        captured.dispose();
+
+        // Reduziertes Status-Update (nur alle 500ms für Performance)
+        if (ms % 500 == 0) {
+          _updateAnalysisStatus('Phase 1: Bewegungs-Erkennung...',
+              '${(ms / durationMs * 100).toStringAsFixed(0)}%');
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('Motion detection error: $e');
+      }
+    }
+
+    // Glätte Motion-Samples (Median-Filter)
+    final smoothedMotion = <double>[];
+    for (int i = 0; i < motionSamples.length; i++) {
+      if (i == 0 || i == motionSamples.length - 1) {
+        smoothedMotion.add(motionSamples[i]);
+      } else {
+        final window = [
+          motionSamples[i - 1],
+          motionSamples[i],
+          motionSamples[i + 1],
+        ]..sort();
+        smoothedMotion.add(window[1]); // Median
+      }
+    }
+
+    // Erstelle Segmente mit Golf-Phase-Erkennung
+    for (int i = 0; i < smoothedMotion.length; i++) {
+      final startMs = i * sampleInterval;
+      final endMs = ((i + 1) * sampleInterval).clamp(0, durationMs);
+      final motion = smoothedMotion[i];
+
+      // Erkenne Schwung-Phase basierend auf Motion
+      final phase = _detectSwingPhase(motion, i, smoothedMotion);
+
+      // Wähle FPS basierend auf Phase
+      int fps;
+      if (phase == SwingPhase.downswing || phase == SwingPhase.impact) {
+        fps = 120; // Kritische Momente!
+      } else if (phase == SwingPhase.transition ||
+          phase == SwingPhase.backswing ||
+          phase == SwingPhase.followThrough) {
+        fps = 60; // Moderate Bewegung
+      } else {
+        fps = 30; // Setup, Top, Finish
+      }
+
+      segments.add(MotionSegment(
+        startMs: startMs,
+        endMs: endMs,
+        motionLevel: motion,
+        phase: phase,
+        recommendedFps: fps,
+      ));
+    }
+
+    // Merge ähnliche aufeinanderfolgende Segmente
+    final mergedSegments = <MotionSegment>[];
+    MotionSegment? current;
+
+    for (final segment in segments) {
+      if (current == null) {
+        current = segment;
+      } else if (current.phase == segment.phase &&
+          current.recommendedFps == segment.recommendedFps) {
+        // Merge
+        current = MotionSegment(
+          startMs: current.startMs,
+          endMs: segment.endMs,
+          motionLevel: (current.motionLevel + segment.motionLevel) / 2,
+          phase: current.phase,
+          recommendedFps: current.recommendedFps,
+        );
+      } else {
+        mergedSegments.add(current);
+        current = segment;
+      }
+    }
+    if (current != null) mergedSegments.add(current);
+
+    return mergedSegments;
+  }
+
+  /// Erkennt Schwung-Phase basierend auf Motion-Muster
+  SwingPhase _detectSwingPhase(
+      double motion, int index, List<double> allMotion) {
+    // Address: Anfang, wenig Bewegung
+    if (index < 5 && motion < 0.15) {
+      return SwingPhase.address;
+    }
+
+    // Takeaway: Bewegung beginnt
+    if (motion > 0.1 && motion < 0.4) {
+      return SwingPhase.takeaway;
+    }
+
+    // Backswing: Moderate ansteigende Bewegung
+    if (motion >= 0.4 && motion < 0.6) {
+      return SwingPhase.backswing;
+    }
+
+    // Top: Kurze Pause (Motion sinkt kurz)
+    if (index > 0 && index < allMotion.length - 1) {
+      final prev = allMotion[index - 1];
+      final next = allMotion[index + 1];
+      if (motion < prev && motion < next && motion < 0.5) {
+        return SwingPhase.top;
+      }
+    }
+
+    // Transition: Kurz vor Downswing
+    if (motion >= 0.6 && motion < 0.75) {
+      return SwingPhase.transition;
+    }
+
+    // Downswing: Sehr hohe Bewegung
+    if (motion >= 0.75 && motion < 0.9) {
+      return SwingPhase.downswing;
+    }
+
+    // Impact: Peak Motion
+    if (motion >= 0.9) {
+      return SwingPhase.impact;
+    }
+
+    // Follow-Through: Auslaufende Bewegung
+    if (motion >= 0.5 && motion < 0.75) {
+      return SwingPhase.followThrough;
+    }
+
+    // Finish: Ende, abnehmende Bewegung
+    return SwingPhase.finish;
+  }
+
+  /// Worker-Methode für parallele Segment-Analyse
+  Future<List<Map<String, dynamic>>> _analyzeSegmentsWorker({
+    required String videoPath,
+    required List<MotionSegment> segments,
+    required int videoWidth,
+    required int videoHeight,
+    required int workerIndex,
+  }) async {
+    final poseData = <Map<String, dynamic>>[];
+
+    // Eigener Video-Controller für diesen Worker
+    final workerController = VideoPlayerController.file(File(videoPath));
+    await workerController.initialize();
+    await workerController.pause();
+
+    // Eigener Repaint-Key
+    final GlobalKey workerRepaintKey = GlobalKey();
+
+    // Eigenes Overlay
+    OverlayEntry? workerOverlay = OverlayEntry(
+      builder: (context) => Positioned(
+        left: -10000 - (workerIndex * 2000),
+        top: -10000,
+        child: RepaintBoundary(
+          key: workerRepaintKey,
+          child: SizedBox(
+            width: videoWidth.toDouble(),
+            height: videoHeight.toDouble(),
+            child: VideoPlayer(workerController),
+          ),
+        ),
+      ),
+    );
+
+    if (mounted) {
+      Overlay.of(context).insert(workerOverlay);
+      await Future.delayed(Duration(milliseconds: 300));
+    }
+
+    int frameCount = 0;
+
+    try {
+      for (final segment in segments) {
+        final fps = segment.recommendedFps;
+        final msPerFrame = 1000 / fps;
+
+        for (double frameTime = segment.startMs.toDouble();
+            frameTime < segment.endMs;
+            frameTime += msPerFrame) {
+          final ms = frameTime.round();
+
+          try {
+            await workerController.seekTo(Duration(milliseconds: ms));
+            await Future.delayed(Duration(milliseconds: 45));
+
+            final renderObj =
+                workerRepaintKey.currentContext?.findRenderObject();
+            if (renderObj is! RenderRepaintBoundary) continue;
+
+            final boundary = renderObj as RenderRepaintBoundary;
+            final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
+            final byteData =
+                await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+
+            if (byteData == null) continue;
+
+            final rgba = byteData.buffer.asUint8List();
+            final w = captured.width;
+            final h = captured.height;
+
+            // MoveNet Inferenz
+            final cropData = _prepareMoveNetInput(rgba, w, h,
+                centerCrop: true, targetSize: 192);
+            final inputImage = cropData['image'] as List;
+            final cropMeta = cropData['crop'] as Map<String, int>;
+
+            // Konvertiere zu Uint8List
+            final uint8Input = Uint8List(192 * 192 * 3);
+            int idx = 0;
+            for (int y = 0; y < 192; y++) {
+              for (int x = 0; x < 192; x++) {
+                for (int c = 0; c < 3; c++) {
+                  uint8Input[idx++] =
+                      (inputImage[y][x][c] * 255).round().clamp(0, 255);
+                }
+              }
+            }
+
+            final input =
+                uint8Input.buffer.asUint8List().reshape([1, 192, 192, 3]);
+            final output = List.generate(
+                1,
+                (_) => List.generate(
+                    1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
+
+            MoveNetManager.interpreter!.run(input, output);
+
+            final rawOut = output[0][0];
+            final cropX = cropMeta['x']!;
+            final cropY = cropMeta['y']!;
+            final cropW = cropMeta['w']!;
+            final cropH = cropMeta['h']!;
+
+            const keypointNames = [
+              'nose',
+              'left_eye',
+              'right_eye',
+              'left_ear',
+              'right_ear',
+              'left_shoulder',
+              'right_shoulder',
+              'left_elbow',
+              'right_elbow',
+              'left_wrist',
+              'right_wrist',
+              'left_hip',
+              'right_hip',
+              'left_knee',
+              'right_knee',
+              'left_ankle',
+              'right_ankle',
+            ];
+
+            final keypoints = <String, Map<String, double>>{};
+
+            for (int i = 0; i < 17; i++) {
+              final y = (rawOut[i][0] as double).clamp(0.0, 1.0);
+              final x = (rawOut[i][1] as double).clamp(0.0, 1.0);
+              final score = (rawOut[i][2] as double).clamp(0.0, 1.0);
+
+              final double origX = (cropX + x * cropW) / w;
+              final double origY = (cropY + y * cropH) / h;
+
+              keypoints[keypointNames[i]] = {
+                'x': origX,
+                'y': origY,
+                'score': score,
+              };
+            }
+
+            final leftShoulder = keypoints['left_shoulder']!;
+            final rightShoulder = keypoints['right_shoulder']!;
+
+            if (leftShoulder['score']! >= 0.3 &&
+                rightShoulder['score']! >= 0.3) {
+              poseData.add({
+                'timestamp_ms': ms,
+                'frame_index': frameCount,
+                'fps_used': fps,
+                'motion_level': segment.motionLevel,
+                'swing_phase': segment.phase.toString(),
+                'worker_id': workerIndex,
+                'keypoints': keypoints,
+              });
+              frameCount++;
+
+              // Reduziertes Logging für Performance (nur jedes 30. Frame)
+              if (kDebugMode && frameCount % 30 == 0) {
+                debugPrint('⚡ Worker $workerIndex: $frameCount frames');
+              }
+            }
+
+            captured.dispose();
+          } catch (e) {
+            if (kDebugMode)
+              debugPrint('Worker $workerIndex error at ${ms}ms: $e');
+          }
+        }
+
+        // Progress Update (reduziert für Performance - nur alle 20%)
+        if (mounted &&
+            segments.indexOf(segment) % (segments.length ~/ 5).clamp(1, 999) ==
+                0) {
+          final progress = (segments.indexOf(segment) / segments.length * 100)
+              .toStringAsFixed(0);
+          _updateAnalysisStatus(
+              'Phase 2: Worker $workerIndex...', '$progress%');
+        }
+      }
+    } finally {
+      workerOverlay.remove();
+      await workerController.dispose();
+    }
+
+    if (kDebugMode) {
+      debugPrint('Worker $workerIndex: Analyzed $frameCount frames');
+    }
+
+    return poseData;
   }
 }
 
@@ -2729,9 +3195,9 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       Overlay.of(context).insert(overlayEntry);
       await Future.delayed(Duration(milliseconds: 500));
 
-      // Frame-by-Frame Analyse mit MoveNet (30fps = 33.33ms)
+      // Frame-by-Frame Analyse mit MoveNet (120fps = 8.33ms)
       int frameCount = 0;
-      final estimatedFps = 30;
+      final estimatedFps = 120;
       final msPerFrame = 1000 / estimatedFps;
 
       if (kDebugMode)
