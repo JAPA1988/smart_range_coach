@@ -24,6 +24,16 @@ import 'models/pose_frame.dart';
 // Widgets
 import 'widgets/pose_overlay_painter.dart';
 
+// Extension für firstWhereOrNull
+extension ListExtension<T> on List<T> {
+  T? firstWhereOrNull(bool Function(T element) test) {
+    for (final element in this) {
+      if (test(element)) return element;
+    }
+    return null;
+  }
+}
+
 // Golf-Schwung-Phasen
 enum SwingPhase {
   address, // Setup
@@ -574,6 +584,12 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   // MoveNet UI / export state
   bool _useMoveNet = true;
   double _minKeypointScore = 0.3;
+
+  // NEU: Nutze PoseFrame statt Map
+  List<PoseFrame>? _poseFrames;
+  PoseFrame? _currentPoseFrame;
+
+  // ALT - für Backward Compatibility (deprecated)
   List<Map<String, double>>? _lastKeypoints;
   Map<String, int>? _lastCrop;
   bool _centerCropEnabled = true;
@@ -634,7 +650,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
   Future<void> _loadPrecomputedPose() async {
     try {
-      // Versuche zuerst vollständige Pose-Daten zu laden
       final poseJsonPath =
           widget.videoPath.replaceAll('.mp4', '_movenet_pose.json');
       final poseFile = File(poseJsonPath);
@@ -642,33 +657,49 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       if (await poseFile.exists()) {
         final jsonString = await poseFile.readAsString();
         final data = jsonDecode(jsonString);
-        _precomputedShoulders = List<Map<String, dynamic>>.from(data['frames']);
+        final framesJson = List<Map<String, dynamic>>.from(data['frames']);
 
-        if (kDebugMode)
+        // Parse alle Frames
+        final allFrames =
+            framesJson.map((json) => PoseFrame.fromJson(json)).toList();
+
+        // Filtere nur valide Frames mit Körper
+        _poseFrames = allFrames.where((frame) {
+          if (!frame.isValid) return false;
+
+          // Prüfe ob Körper wirklich präsent ist
+          final keypointsMap =
+              frame.keypoints.map((k, v) => MapEntry(k, v.toJson()));
+          return PoseValidator.isBodyPresent(keypointsMap);
+        }).toList();
+
+        if (kDebugMode) {
           debugPrint(
-              '✅ Loaded ${_precomputedShoulders!.length} pose frames (17 keypoints)');
-      } else {
-        // Fallback: Nur Schultern (alte JSON)
-        final shoulderJsonPath =
-            widget.videoPath.replaceAll('.mp4', '_shoulders.json');
-        final shoulderFile = File(shoulderJsonPath);
+              '✅ Loaded ${_poseFrames!.length} valid pose frames WITH body');
+          debugPrint(
+              '⚠️ Filtered out ${allFrames.length - _poseFrames!.length} frames WITHOUT body');
 
-        if (await shoulderFile.exists()) {
-          final jsonString = await shoulderFile.readAsString();
-          final data = jsonDecode(jsonString) as List;
-          _precomputedShoulders =
-              data.map((e) => e as Map<String, dynamic>).toList();
-
-          if (kDebugMode)
+          if (_poseFrames!.isNotEmpty) {
+            final avgQuality = _poseFrames!
+                    .map((f) => f.qualityScore)
+                    .reduce((a, b) => a + b) /
+                _poseFrames!.length;
             debugPrint(
-                '✅ Loaded ${_precomputedShoulders!.length} shoulder positions (legacy)');
-        } else {
-          if (kDebugMode)
-            debugPrint('ℹ️ No pre-computed data found, will use live tracking');
+                '📊 Average quality: ${(avgQuality * 100).toStringAsFixed(1)}%');
+
+            // Zeige Zeitbereich
+            final firstMs = _poseFrames!.first.timestamp.inMilliseconds;
+            final lastMs = _poseFrames!.last.timestamp.inMilliseconds;
+            debugPrint('⏱️ Pose data range: ${firstMs}ms - ${lastMs}ms');
+          }
         }
+
+        setState(() {});
+      } else {
+        if (kDebugMode) debugPrint('ℹ️ No pose data found');
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('Failed to load pre-computed data: $e');
+      if (kDebugMode) debugPrint('❌ Failed to load pose: $e');
     }
   }
 
@@ -870,6 +901,125 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     }
   }
 
+  void _updatePoseFromVideo() {
+    if (_poseFrames == null || _poseFrames!.isEmpty || _controller == null) {
+      setState(() {
+        _currentPoseFrame = null;
+      });
+      return;
+    }
+
+    final currentTime = _controller!.value.position;
+    final currentMs = currentTime.inMilliseconds;
+
+    // Edge case: Vor erstem Frame
+    if (currentMs < _poseFrames!.first.timestamp.inMilliseconds) {
+      setState(() {
+        _currentPoseFrame = null; // ← Zeige NICHTS an!
+      });
+      return;
+    }
+
+    // Edge case: Nach letztem Frame
+    if (currentMs > _poseFrames!.last.timestamp.inMilliseconds + 500) {
+      // +500ms Toleranz
+      setState(() {
+        _currentPoseFrame = null; // ← Zeige NICHTS mehr an!
+      });
+      return;
+    }
+
+    // Finde umgebende Frames
+    PoseFrame? before;
+    PoseFrame? after;
+
+    for (int i = 0; i < _poseFrames!.length - 1; i++) {
+      if (_poseFrames![i].timestamp.inMilliseconds <= currentMs &&
+          _poseFrames![i + 1].timestamp.inMilliseconds > currentMs) {
+        before = _poseFrames![i];
+        after = _poseFrames![i + 1];
+        break;
+      }
+    }
+
+    // Exakter Match (±50ms Toleranz)
+    final exact = _poseFrames!.firstWhereOrNull(
+      (f) => (f.timestamp.inMilliseconds - currentMs).abs() < 50,
+    );
+
+    if (exact != null) {
+      setState(() {
+        _currentPoseFrame = exact.isValid ? exact : null;
+      });
+      return;
+    }
+
+    // Interpoliere zwischen Frames
+    if (before != null && after != null && before.isValid && after.isValid) {
+      final totalDuration =
+          (after.timestamp.inMicroseconds - before.timestamp.inMicroseconds)
+              .toDouble();
+      final elapsed =
+          (currentTime.inMicroseconds - before.timestamp.inMicroseconds)
+              .toDouble();
+      final t = (elapsed / totalDuration).clamp(0.0, 1.0);
+
+      // Interpoliere Keypoints
+      final interpolatedKeypoints = <String, Keypoint>{};
+
+      for (final key in before.keypoints.keys) {
+        if (after.keypoints.containsKey(key)) {
+          final kpBefore = before.keypoints[key]!;
+          final kpAfter = after.keypoints[key]!;
+
+          // Nur interpolieren wenn beide sichtbar
+          if (kpBefore.isVisible && kpAfter.isVisible) {
+            interpolatedKeypoints[key] = kpBefore.lerp(kpAfter, t);
+          }
+        }
+      }
+
+      // Prüfe ob interpolierter Frame valide ist
+      if (interpolatedKeypoints.length >= 4) {
+        // Mindestens 4 Keypoints
+        final interpolated = PoseFrame(
+          timestamp: currentTime,
+          frameIndex: -1,
+          keypoints: interpolatedKeypoints,
+          qualityScore: before.qualityScore +
+              (after.qualityScore - before.qualityScore) * t,
+        );
+
+        // Final validation
+        final keypointsMap =
+            interpolated.keypoints.map((k, v) => MapEntry(k, v.toJson()));
+        if (PoseValidator.isBodyPresent(keypointsMap)) {
+          setState(() {
+            _currentPoseFrame = interpolated;
+          });
+          return;
+        }
+      }
+    }
+
+    // Fallback: Finde nächsten Frame
+    PoseFrame? nearest;
+    int minDiff = 999999;
+
+    for (final frame in _poseFrames!) {
+      final diff = (frame.timestamp.inMilliseconds - currentMs).abs();
+      if (diff < minDiff && frame.isValid) {
+        minDiff = diff;
+        nearest = frame;
+      }
+    }
+
+    // Nur nutzen wenn nicht zu weit weg (max 200ms)
+    setState(() {
+      _currentPoseFrame = (nearest != null && minDiff < 200) ? nearest : null;
+    });
+  }
+
   /// Predictive Smoothing für flüssigere Bewegung
   void _applySmoothingToKeypoints(Map<String, Offset?> rawKeypoints) {
     rawKeypoints.forEach((name, newPos) {
@@ -965,8 +1115,11 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
           } catch (_) {}
         }
 
-        // NEU: Verwende alle Keypoints falls verfügbar
-        if (_precomputedShoulders != null) {
+        // NEU: Nutze PoseFrame-basierte Methode
+        if (_poseFrames != null && _poseFrames!.isNotEmpty) {
+          _updatePoseFromVideo();
+        } else if (_precomputedShoulders != null) {
+          // Fallback für alte Datenstruktur
           _updateAllKeypointsFromPrecomputed();
         }
 
@@ -2018,8 +2171,15 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                           key: _videoRepaintKey,
                           child: VideoPlayer(ctrl),
                         ),
-                        // Keypoints overlay (if available)
-                        if (_lastKeypoints != null)
+                        // NEU: Nutze PoseOverlayPainter mit PoseFrame
+                        if (_currentPoseFrame != null)
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: PoseOverlayPainter(_currentPoseFrame),
+                            ),
+                          ),
+                        // Keypoints overlay (if available - Fallback für alte Daten)
+                        if (_lastKeypoints != null && _currentPoseFrame == null)
                           Positioned.fill(
                             child: CustomPaint(
                               painter: KeypointsPainter(
@@ -2030,8 +2190,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                           ctrl.value.size.height)),
                             ),
                           ),
-                        // Persistent body markers
-                        if (_allKeypoints != null && _allKeypoints!.isNotEmpty)
+                        // Persistent body markers (ALT - nur wenn kein PoseFrame verfügbar)
+                        if (_allKeypoints != null &&
+                            _allKeypoints!.isNotEmpty &&
+                            _currentPoseFrame == null)
                           Positioned.fill(
                             child: CustomPaint(
                               painter: _PoseKeyPointsPainter(
@@ -2039,6 +2201,45 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                   imageSize: _lastCapturedImageSize ??
                                       Size(ctrl.value.size.width,
                                           ctrl.value.size.height)),
+                            ),
+                          ),
+                        // Debug-Widget für Pose-Status
+                        if (kDebugMode && _controller != null)
+                          Positioned(
+                            top: 10,
+                            left: 10,
+                            child: Container(
+                              padding: EdgeInsets.all(8),
+                              color: Colors.black54,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Time: ${_controller!.value.position.inMilliseconds}ms',
+                                    style: TextStyle(
+                                        color: Colors.white, fontSize: 12),
+                                  ),
+                                  if (_poseFrames != null)
+                                    Text(
+                                      'Pose Frames: ${_poseFrames!.length}',
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 12),
+                                    ),
+                                  if (_currentPoseFrame != null)
+                                    Text(
+                                      'Current Pose: ✅ (Q: ${(_currentPoseFrame!.qualityScore * 100).toStringAsFixed(0)}%)',
+                                      style: TextStyle(
+                                          color: Colors.green, fontSize: 12),
+                                    )
+                                  else
+                                    Text(
+                                      'Current Pose: ❌ No body detected',
+                                      style: TextStyle(
+                                          color: Colors.red, fontSize: 12),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         // Crop debug overlay
