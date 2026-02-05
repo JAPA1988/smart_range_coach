@@ -17,6 +17,13 @@ import 'services/swing_comparison.dart';
 import 'screens/swing_comparison_screen.dart';
 // import 'services/video_frame_extractor.dart'; // FFmpeg-basiert - nicht mehr verwendet
 
+// Models
+import 'models/pose_validator.dart';
+import 'models/pose_frame.dart';
+
+// Widgets
+import 'widgets/pose_overlay_painter.dart';
+
 // Golf-Schwung-Phasen
 enum SwingPhase {
   address, // Setup
@@ -2538,18 +2545,17 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
           if (result != null && result['keypoints'] != null) {
             final keypoints = result['keypoints'] as Map<String, dynamic>;
-            final leftShoulder = keypoints['left_shoulder'];
-            final rightShoulder = keypoints['right_shoulder'];
 
-            if (leftShoulder != null &&
-                rightShoulder != null &&
-                leftShoulder['score'] >= 0.3 &&
-                rightShoulder['score'] >= 0.3) {
+            // NEU: Nutze PoseValidator statt manuellem Check
+            if (PoseValidator.isKeypointsValid(keypoints)) {
+              final quality = PoseValidator.calculatePoseQuality(keypoints);
+
               poseData.add({
                 'timestamp_ms': currentMs,
                 'frame_index': frameIndex,
                 'fps_used': estimatedFps,
                 'keypoints': keypoints,
+                'quality_score': quality, // ← Speichere Qualitäts-Score!
               });
             }
           }
