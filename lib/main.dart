@@ -9,6 +9,7 @@ import 'package:flutter/rendering.dart';
 import 'dart:math' as math;
 import 'dart:convert';
 import 'dart:async';
+import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:flutter/foundation.dart';
 
 // Services
@@ -406,14 +407,67 @@ class CameraSmokeTestApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Smart Range Coach – Camera Smoke Test',
+      title: 'Smart Range Coach',
       theme: ThemeData.dark(),
       builder: (context, child) {
         return SafeArea(
           child: child!,
         );
       },
-      home: const CameraSmokeTestScreen(),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Smart Range Coach'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const RecordSwingScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.videocam),
+              label: const Text('Record New Swing'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(250, 60),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ReferenceSwingsScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.people),
+              label: const Text('View Pro Swings'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(250, 60),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
