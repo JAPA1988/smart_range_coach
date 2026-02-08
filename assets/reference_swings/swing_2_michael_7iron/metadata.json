@@ -1,0 +1,23 @@
+{
+  "swing_id": "swing_2_michael_7iron",
+  "golfer_name": "Michael",
+  "club_type": "7-Iron",
+  "skill_level": "Professional",
+  "video_info": {
+    "fps": 60.0,
+    "width": 960,
+    "height": 1080,
+    "total_frames": 1735,
+    "duration_seconds": 28.916666666666668
+  },
+  "key_positions": [
+    "address",
+    "takeaway",
+    "set_position",
+    "top_position",
+    "downswing",
+    "impact",
+    "follow_through"
+  ],
+  "created_date": "2026-02-08"
+}

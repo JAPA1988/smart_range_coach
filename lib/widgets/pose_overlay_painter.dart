@@ -8,14 +8,23 @@ class PoseOverlayPainter extends CustomPainter {
   PoseOverlayPainter(this.poseFrame);
   
   static const List<List<String>> connections = [
+    // Kopf zu Schultern
+    ['nose', 'left_shoulder'],
+    ['nose', 'right_shoulder'],
+    
+    // Oberkörper
     ['left_shoulder', 'right_shoulder'],
     ['left_shoulder', 'left_elbow'],
     ['left_elbow', 'left_wrist'],
     ['right_shoulder', 'right_elbow'],
     ['right_elbow', 'right_wrist'],
+    
+    // Torso
     ['left_shoulder', 'left_hip'],
     ['right_shoulder', 'right_hip'],
     ['left_hip', 'right_hip'],
+    
+    // Beine
     ['left_hip', 'left_knee'],
     ['left_knee', 'left_ankle'],
     ['right_hip', 'right_knee'],
@@ -37,14 +46,40 @@ class PoseOverlayPainter extends CustomPainter {
       return;
     }
     
+    // Farbzuordnung für verschiedene Körperteile
+    final keypointColors = {
+      // Kopf
+      'nose': Colors.cyan,
+      
+      // Schultern
+      'left_shoulder': Colors.red,
+      'right_shoulder': Colors.red,
+      
+      // Ellenbogen
+      'left_elbow': Colors.orange,
+      'right_elbow': Colors.orange,
+      
+      // Handgelenke
+      'left_wrist': Colors.amber,
+      'right_wrist': Colors.amber,
+      
+      // Hüften
+      'left_hip': Colors.green,
+      'right_hip': Colors.green,
+      
+      // Knie
+      'left_knee': Colors.blue,
+      'right_knee': Colors.blue,
+      
+      // Knöchel
+      'left_ankle': Colors.purple,
+      'right_ankle': Colors.purple,
+    };
+    
     final linePaint = Paint()
       ..color = Colors.green.withOpacity(0.8)
       ..strokeWidth = 3
       ..style = PaintingStyle.stroke;
-    
-    final pointPaint = Paint()
-      ..color = Colors.red
-      ..style = PaintingStyle.fill;
     
     // Zeichne Verbindungen
     for (final conn in connections) {
@@ -60,9 +95,15 @@ class PoseOverlayPainter extends CustomPainter {
       }
     }
     
-    // Zeichne Keypoints
+    // Zeichne Keypoints mit Farben
     for (final kp in poseFrame!.keypoints.values) {
       if (kp.isVisible) {
+        final color = keypointColors[kp.label] ?? Colors.white;
+        
+        final pointPaint = Paint()
+          ..color = color
+          ..style = PaintingStyle.fill;
+        
         canvas.drawCircle(
           Offset(kp.x * size.width, kp.y * size.height),
           6,

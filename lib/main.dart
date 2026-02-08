@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart';
 // Services
 import 'services/swing_comparison.dart';
 import 'screens/swing_comparison_screen.dart';
+import 'screens/reference_swings_screen.dart';
 // import 'services/video_frame_extractor.dart'; // FFmpeg-basiert - nicht mehr verwendet
 
 // Models
@@ -226,7 +227,13 @@ class MoveNetManager {
         final x = (rawOut[i][1] as double).clamp(0.0, 1.0);
         final score = (rawOut[i][2] as double).clamp(0.0, 1.0);
 
-        keypoints[keypointNames[i]] = {
+        // Filter: Keine Augen-Keypoints verwenden
+        final keypointName = keypointNames[i];
+        if (keypointName == 'left_eye' || keypointName == 'right_eye') {
+          continue; // Überspringe Augen
+        }
+
+        keypoints[keypointName] = {
           'x': x,
           'y': y,
           'score': score,
@@ -4112,6 +4119,20 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
                           ),
                         ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const ReferenceSwingsScreen(),
+                          ),
+                        );
+                      },
+                      child: const Text('View Pro Swings'),
+                    ),
                   ),
                 ],
               ),

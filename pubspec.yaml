@@ -30,3 +30,29 @@ flutter:
   assets:
     - assets/movenet_singlepose_lightning.tflite
     - assets/pro_swings/sample_pro.json
+    # Reference Swings - temporarily disabled until copied correctly
+    # - assets/reference_swings/swing_1_andy_7iron/metadata.json
+    # - assets/reference_swings/swing_1_andy_7iron/key_positions.json
+    # - assets/reference_swings/swing_1_andy_7iron/position_analysis.json
+    # - assets/reference_swings/swing_1_andy_7iron/video.mp4
+    # - assets/reference_swings/swing_1_andy_7iron/images/
+    # - assets/reference_swings/swing_2_michael_7iron/metadata.json
+    # - assets/reference_swings/swing_2_michael_7iron/key_positions.json
+    # - assets/reference_swings/swing_2_michael_7iron/position_analysis.json
+    # - assets/reference_swings/swing_2_michael_7iron/video.mp4
+    # - assets/reference_swings/swing_2_michael_7iron/images/
+    # - assets/reference_swings/swing_3_scott_7iron/metadata.json
+    # - assets/reference_swings/swing_3_scott_7iron/key_positions.json
+    # - assets/reference_swings/swing_3_scott_7iron/position_analysis.json
+    # - assets/reference_swings/swing_3_scott_7iron/video.mp4
+    # - assets/reference_swings/swing_3_scott_7iron/images/
+    # - assets/reference_swings/swing_4_patrick_7iron/metadata.json
+    # - assets/reference_swings/swing_4_patrick_7iron/key_positions.json
+    # - assets/reference_swings/swing_4_patrick_7iron/position_analysis.json
+    # - assets/reference_swings/swing_4_patrick_7iron/video.mp4
+    # - assets/reference_swings/swing_4_patrick_7iron/images/
+    # - assets/reference_swings/swing_5_john_7iron/metadata.json
+    # - assets/reference_swings/swing_5_john_7iron/key_positions.json
+    # - assets/reference_swings/swing_5_john_7iron/position_analysis.json
+    # - assets/reference_swings/swing_5_john_7iron/video.mp4
+    # - assets/reference_swings/swing_5_john_7iron/images/
