@@ -1,280 +1,291 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'dart:io';
-import 'package:flutter/services.dart' show rootBundle;
-import '../services/swing_comparison.dart';
+
+import '../models/reference_swing.dart' as ref;
+import '../models/user_swing.dart' as user;
+import '../services/reference_swing_service.dart';
+import '../widgets/skeleton_painter.dart';
 
 class SwingComparisonScreen extends StatefulWidget {
-  final String userVideoPath;
-  
-  const SwingComparisonScreen({required this.userVideoPath, super.key});
-  
+  final user.UserSwing userSwing;
+
+  const SwingComparisonScreen({super.key, required this.userSwing});
+
   @override
   State<SwingComparisonScreen> createState() => _SwingComparisonScreenState();
 }
 
 class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
+  List<ref.ReferenceSwing>? _proSwings;
+  ref.ReferenceSwing? _selectedProSwing;
+  String _selectedPosition = 'address';
   bool _loading = true;
   String? _error;
-  Map<String, dynamic>? _comparisonResult;
-  List<Map<String, dynamic>>? _userFrames;
-  List<Map<String, dynamic>>? _proFrames;
-  
+
+  final List<String> _positions = [
+    'address',
+    'takeaway',
+    'set_position',
+    'top_position',
+    'downswing',
+    'impact',
+    'follow_through',
+  ];
+
   @override
   void initState() {
     super.initState();
-    _loadAndCompare();
+    _loadProSwings();
   }
-  
-  Future<void> _loadAndCompare() async {
+
+  Future<void> _loadProSwings() async {
     try {
-      // Lade User-Daten
-      final userJsonPath = widget.userVideoPath.replaceAll('.mp4', '_movenet_pose.json');
-      final userFile = File(userJsonPath);
-      
-      if (!await userFile.exists()) {
-        setState(() {
-          _error = 'Pose-Daten nicht gefunden. Bitte Video neu analysieren.';
-          _loading = false;
-        });
-        return;
-      }
-      
-      final userJson = jsonDecode(await userFile.readAsString());
-      _userFrames = List<Map<String, dynamic>>.from(userJson['frames']);
-      
-      // Lade Profi-Daten
-      final proJson = jsonDecode(
-        await rootBundle.loadString('assets/pro_swings/sample_pro.json')
-      );
-      _proFrames = List<Map<String, dynamic>>.from(proJson['frames']);
-      
-      // Vergleiche
-      final result = SwingComparison.compareSwings(_userFrames!, _proFrames!);
-      
+      final service = ReferenceSwingService();
+      final swings = await service.loadAllSwings();
+      if (!mounted) return;
       setState(() {
-        _comparisonResult = result;
+        _proSwings = swings;
+        _selectedProSwing = swings.isNotEmpty ? swings.first : null;
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _error = 'Fehler beim Vergleich: $e';
+        _error = 'Failed to load pro swings: $e';
         _loading = false;
       });
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Comparison')),
+        body: Center(child: Text(_error!)),
+      );
+    }
+
+    if (_selectedProSwing == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Comparison')),
+        body: const Center(child: Text('No pro swings available')),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Schwung-Vergleich'),
+        title: const Text('Swing Comparison'),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
-              : _buildComparisonView(),
+      body: Column(
+        children: [
+          _buildProSwingSelector(),
+          _buildPositionSelector(),
+          Expanded(child: _buildSideBySideComparison()),
+          _buildMetricsTable(),
+        ],
+      ),
     );
   }
-  
-  Widget _buildComparisonView() {
-    final score = _comparisonResult!['overall_score'];
-    final keypointScores = _comparisonResult!['keypoint_scores'] as Map<String, dynamic>;
-    final recommendations = _comparisonResult!['recommendations'] as List;
-    
-    return SingleChildScrollView(
+
+  Widget _buildProSwingSelector() {
+    return Container(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      color: Colors.blue[50],
+      child: Row(
         children: [
-          // Gesamt-Score
-          Card(
-            color: _getScoreColor(score),
-            elevation: 8,
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Text(
-                    '${score.toStringAsFixed(1)}%',
-                    style: const TextStyle(
-                      fontSize: 64,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Aehnlichkeit zu Profi-Schwung',
-                    style: TextStyle(fontSize: 18, color: Colors.white70),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _getScoreLabel(score),
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Empfehlungen
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.lightbulb, color: Colors.amber, size: 28),
-                      SizedBox(width: 8),
-                      Text(
-                        'Verbesserungsvorschlaege',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  ...recommendations.map((rec) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('  ', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        Expanded(
-                          child: Text(
-                            rec.toString(),
-                            style: const TextStyle(fontSize: 16),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Keypoint-Details
-          const Text(
-            'Detaillierte Analyse',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          
-          ...keypointScores.entries.map((entry) {
-            final keypoint = entry.key;
-            final score = entry.value as double;
-            
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _formatKeypointName(keypoint),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${score.toStringAsFixed(0)}%',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: _getKeypointColor(score),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: score / 100,
-                      backgroundColor: Colors.grey.shade300,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        _getKeypointColor(score),
-                      ),
-                      minHeight: 8,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
-          
-          const SizedBox(height: 24),
-          
-          // Analyse-Info
-          Card(
-            color: Colors.blue.shade50,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.info, color: Colors.blue),
-                      SizedBox(width: 8),
-                      Text(
-                        'Analyse-Details',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text('User Frames: ${_userFrames!.length}'),
-                  Text('Pro Frames: ${_proFrames!.length}'),
-                  Text('Verglichene Keypoints: ${keypointScores.length}'),
-                ],
-              ),
+          const Text('Compare with: ',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: DropdownButton<ref.ReferenceSwing>(
+              value: _selectedProSwing,
+              isExpanded: true,
+              items: _proSwings!.map((swing) {
+                return DropdownMenuItem(
+                  value: swing,
+                  child: Text('${swing.golferName} (${swing.clubType})'),
+                );
+              }).toList(),
+              onChanged: (swing) {
+                setState(() => _selectedProSwing = swing);
+              },
             ),
           ),
         ],
       ),
     );
   }
-  
-  Color _getScoreColor(double score) {
-    if (score >= 85) return Colors.green.shade700;
-    if (score >= 70) return Colors.orange.shade700;
-    return Colors.red.shade700;
+
+  Widget _buildPositionSelector() {
+    return SizedBox(
+      height: 60,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        itemCount: _positions.length,
+        itemBuilder: (context, index) {
+          final position = _positions[index];
+          final isSelected = position == _selectedPosition;
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: ChoiceChip(
+              label: Text(_formatPositionName(position)),
+              selected: isSelected,
+              onSelected: (selected) {
+                if (selected) {
+                  setState(() => _selectedPosition = position);
+                }
+              },
+            ),
+          );
+        },
+      ),
+    );
   }
-  
-  String _getScoreLabel(double score) {
-    if (score >= 90) return 'Hervorragend!';
-    if (score >= 80) return 'Sehr gut!';
-    if (score >= 70) return 'Gut';
-    if (score >= 60) return 'Verbesserungsfaehig';
-    return 'Training erforderlich';
+
+  Widget _buildSideBySideComparison() {
+    final userPosition = widget.userSwing.markedPositions?[_selectedPosition];
+    final proPosition = _selectedProSwing!.positions[_selectedPosition];
+
+    if (userPosition == null || proPosition == null) {
+      return const Center(child: Text('Position data not available'));
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(8),
+                child: Text(
+                  'Your Swing',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: CustomPaint(
+                  painter: SkeletonPainter(keypoints: userPosition.keypoints),
+                  size: Size.infinite,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(width: 2, color: Colors.grey),
+        Expanded(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  _selectedProSwing!.golferName,
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: CustomPaint(
+                  painter: SkeletonPainter(keypoints: proPosition.keypoints),
+                  size: Size.infinite,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
-  
-  Color _getKeypointColor(double score) {
-    if (score >= 80) return Colors.green;
-    if (score >= 60) return Colors.orange;
-    return Colors.red;
+
+  Widget _buildMetricsTable() {
+    final userPosition = widget.userSwing.markedPositions?[_selectedPosition];
+    final proAnalysis = _selectedProSwing!.analysis[_selectedPosition];
+
+    if (userPosition == null || proAnalysis == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Colors.grey[100],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Metrics Comparison',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          _buildMetricRow('Spine Angle', null, proAnalysis.spineAngle),
+          _buildMetricRow('X-Factor', null, proAnalysis.xFactor),
+          _buildMetricRow('Shoulder Rotation', null, proAnalysis.shoulderRotation),
+          _buildMetricRow('Hip Rotation', null, proAnalysis.hipRotation),
+        ],
+      ),
+    );
   }
-  
-  String _formatKeypointName(String key) {
-    return key
+
+  Widget _buildMetricRow(String label, double? userValue, double proValue) {
+    final hasUser = userValue != null;
+    final diff = hasUser ? (userValue! - proValue).abs() : null;
+    final isGood = diff != null && diff < 10;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(label),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              hasUser ? '${userValue!.toStringAsFixed(1)}°' : '--',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              '${proValue.toStringAsFixed(1)}°',
+              style: const TextStyle(color: Colors.blue),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Row(
+              children: [
+                Icon(
+                  isGood ? Icons.check_circle : Icons.warning,
+                  color: isGood ? Colors.green : Colors.orange,
+                  size: 16,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  diff != null ? '${diff.toStringAsFixed(1)}°' : '--',
+                  style: TextStyle(
+                    color: isGood ? Colors.green : Colors.orange,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatPositionName(String name) {
+    return name
         .split('_')
         .map((word) => word[0].toUpperCase() + word.substring(1))
         .join(' ');
