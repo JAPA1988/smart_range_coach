@@ -1,9 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/reference_swing.dart' as ref;
 import '../models/user_swing.dart' as user;
 import '../services/reference_swing_service.dart';
-import '../widgets/skeleton_painter.dart';
 
 class SwingComparisonScreen extends StatefulWidget {
   final user.UserSwing userSwing;
@@ -171,15 +172,17 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                 ),
               ),
               Expanded(
-                child: CustomPaint(
-                  painter: SkeletonPainter(keypoints: userPosition.keypoints),
-                  size: Size.infinite,
-                ),
+                child: userPosition.skeletonImagePath != null
+                    ? Image.file(
+                        File(userPosition.skeletonImagePath!),
+                        fit: BoxFit.contain,
+                      )
+                    : const Center(child: Text('No image saved')),
               ),
             ],
           ),
         ),
-        Container(width: 2, color: Colors.grey),
+        Container(width: 2, color: Colors.grey[400]),
         Expanded(
           child: Column(
             children: [
@@ -188,13 +191,16 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                 child: Text(
                   _selectedProSwing!.golferName,
                   style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
+                  ),
                 ),
               ),
               Expanded(
-                child: CustomPaint(
-                  painter: SkeletonPainter(keypoints: proPosition.keypoints),
-                  size: Size.infinite,
+                child: Image.asset(
+                  _selectedProSwing!.imagePathForPosition(_selectedPosition),
+                  fit: BoxFit.contain,
                 ),
               ),
             ],

@@ -1,9 +1,32 @@
+  String _formatPositionName(String name) {
+    if (name == 'address') return 'Address';
+    if (name == 'takeaway') return 'Takeaway';
+    if (name == 'set_position') return 'Set Position';
+    if (name == 'top_position') return 'Top Position';
+    if (name == 'downswing') return 'Downswing';
+    if (name == 'impact') return 'Impact';
+    if (name == 'follow_through') return 'Follow Through';
+    return name;
+  }
+
+  void _markCurrentPosition(String positionName) {
+    // TODO: Implement marking logic
+  }
+
+  void _previousFrame() {
+    // TODO: Implement previous frame logic
+  }
+
+  void _nextFrame() {
+    // TODO: Implement next frame logic
+  }
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/user_swing.dart';
+import '../services/skeleton_image_service.dart';
 import 'swing_comparison_screen.dart';
 
 class SwingReviewScreen extends StatefulWidget {
@@ -16,12 +39,11 @@ class SwingReviewScreen extends StatefulWidget {
 }
 
 class _SwingReviewScreenState extends State<SwingReviewScreen> {
+  bool _isGeneratingImage = false;
   late VideoPlayerController _videoController;
-  bool _isVideoInitialized = false;
   int _currentFrame = 0;
-  Map<String, UserKeyPosition> _markedPositions = {};
-
-  final List<String> _keyPositionNames = [
+  Map<String, dynamic> _markedPositions = {};
+  List<String> _keyPositionNames = [
     'address',
     'takeaway',
     'set_position',
@@ -30,195 +52,159 @@ class _SwingReviewScreenState extends State<SwingReviewScreen> {
     'impact',
     'follow_through',
   ];
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeVideo();
-    if (widget.userSwing.markedPositions != null) {
-      _markedPositions = Map.from(widget.userSwing.markedPositions!);
-    }
-  }
-
-  Future<void> _initializeVideo() async {
-    _videoController =
-        VideoPlayerController.file(File(widget.userSwing.videoPath));
-    await _videoController.initialize();
-
-    _videoController.addListener(() {
-      final position = _videoController.value.position.inMilliseconds;
-      final frameIndex = _frameIndexFromTimestamp(position);
-
-      if (frameIndex != _currentFrame) {
-        setState(() => _currentFrame = frameIndex);
-      }
-    });
-
-    if (!mounted) return;
-    setState(() => _isVideoInitialized = true);
-  }
-
-  int _frameIndexFromTimestamp(int positionMs) {
-    if (widget.userSwing.frames.isEmpty) return 0;
-    int closestIndex = 0;
-    int closestDiff = (widget.userSwing.frames.first.timestampMs - positionMs)
-        .abs();
-
-    for (int i = 1; i < widget.userSwing.frames.length; i++) {
-      final diff =
-          (widget.userSwing.frames[i].timestampMs - positionMs).abs();
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestIndex = i;
-      }
-    }
-
-    return closestIndex;
-  }
-
-  void _markCurrentPosition(String positionName) {
-    if (_markedPositions.containsKey(positionName)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$positionName already marked!')),
-      );
-      return;
-    }
-
-    if (widget.userSwing.frames.isEmpty) return;
-    if (_currentFrame >= widget.userSwing.frames.length) return;
-
-    final frameData = widget.userSwing.frames[_currentFrame];
-
-    setState(() {
-      _markedPositions[positionName] = UserKeyPosition(
-        frameIndex: _currentFrame,
-        timestampMs: frameData.timestampMs,
-        keypoints: frameData.keypoints,
-        markedAt: DateTime.now(),
-      );
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Marked ${_formatPositionName(positionName)} at frame $_currentFrame',
-        ),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
-  void _previousFrame() {
-    if (widget.userSwing.frames.isEmpty) return;
-    if (_currentFrame > 0) {
-      final targetMs = widget.userSwing.frames[_currentFrame - 1].timestampMs;
-      _videoController.seekTo(Duration(milliseconds: targetMs));
-    }
-  }
-
-  void _nextFrame() {
-    if (widget.userSwing.frames.isEmpty) return;
-    if (_currentFrame < widget.userSwing.frames.length - 1) {
-      final targetMs = widget.userSwing.frames[_currentFrame + 1].timestampMs;
-      _videoController.seekTo(Duration(milliseconds: targetMs));
-    }
-  }
-
-  void _goToComparison() {
-    if (_markedPositions.length < _keyPositionNames.length) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Incomplete Marking'),
-          content: const Text(
-            'Please mark all 7 key positions before comparing.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
+  // ...existing code...
+                '${_markedPositions.length}/7',
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SwingComparisonScreen(
-          userSwing: widget.userSwing.copyWith(
-            markedPositions: _markedPositions,
           ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_isVideoInitialized) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mark Key Positions'),
-        actions: [
-          TextButton.icon(
-            onPressed: _markedPositions.length == _keyPositionNames.length
-                ? _goToComparison
-                : null,
-            icon: const Icon(Icons.compare_arrows, color: Colors.white),
-            label: const Text('Compare', style: TextStyle(color: Colors.white)),
+          IconButton(
+            onPressed:
+                _markedPositions.length == 7 ? _goToComparison : null,
+            icon: const Icon(Icons.compare_arrows),
+            tooltip: 'Compare with Pro',
           ),
         ],
       ),
       body: Column(
         children: [
-          AspectRatio(
-            aspectRatio: _videoController.value.aspectRatio,
-            child: VideoPlayer(_videoController),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 6,
+                  child: _buildKeyPositionsList(),
+                ),
+                // ...existing code...
+              ],
+            ),
           ),
-          if (widget.userSwing.frames.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'No pose frames available. Please analyze the video first.',
-              ),
-            )
-          else ...[
-            _buildVideoControls(),
-            Expanded(child: _buildKeyPositionsList()),
-          ],
         ],
       ),
-    );
-  }
-
-  Widget _buildVideoControls() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      color: Colors.grey[200],
-      child: Column(
-        children: [
-          Slider(
-            value: _currentFrame.toDouble(),
-            min: 0,
-            max: (widget.userSwing.frames.length - 1).toDouble(),
-            onChanged: (value) {
-              final frameIndex = value.toInt();
-              final targetMs =
-                  widget.userSwing.frames[frameIndex].timestampMs;
-              _videoController.seekTo(Duration(milliseconds: targetMs));
-            },
+                          final positionName = _keyPositionNames[index];
+                          final isMarked = _markedPositions.containsKey(positionName);
+                          final markedFrame = isMarked ? _markedPositions[positionName]!.frameIndex : null;
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            color: isMarked ? Colors.green[50] : Colors.white,
+                            elevation: isMarked ? 2 : 1,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        isMarked ? Icons.check_circle : Icons.radio_button_unchecked,
+                                        color: isMarked ? Colors.green : Colors.grey,
+                                        size: 20,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _formatPositionName(positionName),
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: isMarked ? FontWeight.bold : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (isMarked) ...[
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Frame: $markedFrame',
+                                      style: TextStyle(fontSize: 11, color: Colors.green[700]),
+                                    ),
+                                  ],
+                                  if (!isMarked && !_videoController.value.isPlaying) ...[
+                                    SizedBox(height: 8),
+                                    SizedBox(
+                                        Widget _buildKeyPositionsList() {
+                                          return Container(
+                                            color: Colors.grey[100],
+                                            child: ListView.builder(
+                                              padding: EdgeInsets.all(8),
+                                              itemCount: _keyPositionNames.length,
+                                              itemBuilder: (context, index) {
+                                                final positionName = _keyPositionNames[index];
+                                                final isMarked = _markedPositions.containsKey(positionName);
+                                                final markedFrame = isMarked ? _markedPositions[positionName]['frameIndex'] : null;
+                                                return Card(
+                                                  margin: EdgeInsets.only(bottom: 8),
+                                                  color: isMarked ? Colors.green[50] : Colors.white,
+                                                  elevation: isMarked ? 2 : 1,
+                                                  child: Padding(
+                                                    padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                                                    child: Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: <Widget>[
+                                                        Row(
+                                                          children: <Widget>[
+                                                            Icon(
+                                                              isMarked ? Icons.check_circle : Icons.radio_button_unchecked,
+                                                              color: isMarked ? Colors.green : Colors.grey,
+                                                              size: 20,
+                                                            ),
+                                                            SizedBox(width: 8),
+                                                            Expanded(
+                                                              child: Text(
+                                                                _formatPositionName(positionName),
+                                                                style: TextStyle(
+                                                                  fontSize: 14,
+                                                                  fontWeight: isMarked ? FontWeight.bold : FontWeight.normal,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        if (isMarked)
+                                                          ...[
+                                                            SizedBox(height: 4),
+                                                            Text(
+                                                              'Frame: $markedFrame',
+                                                              style: TextStyle(fontSize: 11, color: Colors.green[700]),
+                                                            ),
+                                                          ],
+                                                        if (!isMarked && !_videoController.value.isPlaying)
+                                                          ...[
+                                                            SizedBox(height: 8),
+                                                            SizedBox(
+                                                              width: double.infinity,
+                                                              child: ElevatedButton(
+                                                                onPressed: _isGeneratingImage ? null : () => _markCurrentPosition(positionName),
+                                                                style: ElevatedButton.styleFrom(
+                                                                  padding: EdgeInsets.symmetric(vertical: 8),
+                                                                  backgroundColor: Colors.blue,
+                                                                ),
+                                                                child: Text(
+                                                                  'Mark Now',
+                                                                  style: TextStyle(fontSize: 12),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                      ],
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          );
+                                        }
+                  _videoController.seekTo(Duration(milliseconds: targetMs));
+                  setState(() => _currentFrame = frameIndex);
+                }
+              },
+            ),
           ),
           Text(
-            'Frame: $_currentFrame / ${widget.userSwing.frames.length - 1}',
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            'Frame: $_currentFrame / ${widget.userSwing.frames.length}',
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
           ),
           const SizedBox(height: 8),
           Row(
@@ -228,8 +214,9 @@ class _SwingReviewScreenState extends State<SwingReviewScreen> {
                 onPressed: _previousFrame,
                 icon: const Icon(Icons.skip_previous),
                 iconSize: 32,
+                color: Colors.blue[700],
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 24),
               IconButton(
                 onPressed: () {
                   setState(() {
@@ -242,74 +229,151 @@ class _SwingReviewScreenState extends State<SwingReviewScreen> {
                 },
                 icon: Icon(
                   _videoController.value.isPlaying
-                      ? Icons.pause_circle
-                      : Icons.play_circle,
+                      ? Icons.pause_circle_filled
+                      : Icons.play_circle_filled,
                 ),
-                iconSize: 48,
+                iconSize: 56,
+                color: Colors.blue[700],
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 24),
               IconButton(
                 onPressed: _nextFrame,
                 icon: const Icon(Icons.skip_next),
                 iconSize: 32,
+                color: Colors.blue[700],
               ),
             ],
           ),
+          if (_isGeneratingImage)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Generating skeleton image...',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ...existing code...
+    if (name == 'address') return 'Address';
+    if (name == 'takeaway') return 'Takeaway';
+    if (name == 'set_position') return 'Set Position';
+    if (name == 'top_position') return 'Top Position';
+    if (name == 'downswing') return 'Downswing';
+    if (name == 'impact') return 'Impact';
+    if (name == 'follow_through') return 'Follow Through';
+    return name;
+  }
+
+  Widget _buildVideoControls() {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: Colors.grey[200],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 4,
+              thumbShape: RoundSliderThumbShape(enabledThumbRadius: 8),
+            ),
+            child: Slider(
+              value: _currentFrame.toDouble(),
+              min: 0,
+              max: (widget.userSwing.frames.length - 1).toDouble(),
+              onChangeStart: (_) => _videoController.pause(),
+              onChanged: (value) {
+                final frameIndex = value.toInt();
+                if (frameIndex < widget.userSwing.frames.length) {
+                  final targetMs = widget.userSwing.frames[frameIndex].timestampMs;
+                  _videoController.seekTo(Duration(milliseconds: targetMs));
+                  setState(() => _currentFrame = frameIndex);
+                }
+              },
+            ),
+          ),
+          Text(
+            'Frame: $_currentFrame / ${widget.userSwing.frames.length}',
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+          SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                onPressed: _previousFrame,
+                icon: Icon(Icons.skip_previous),
+                iconSize: 32,
+                color: Colors.blue[700],
+              ),
+              SizedBox(width: 24),
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    if (_videoController.value.isPlaying) {
+                      _videoController.pause();
+                    } else {
+                      _videoController.play();
+                    }
+                  });
+                },
+                icon: Icon(
+                  _videoController.value.isPlaying
+                      ? Icons.pause_circle_filled
+                      : Icons.play_circle_filled,
+                ),
+                iconSize: 56,
+                color: Colors.blue[700],
+              ),
+              SizedBox(width: 24),
+              IconButton(
+                onPressed: _nextFrame,
+                icon: Icon(Icons.skip_next),
+                iconSize: 32,
+                color: Colors.blue[700],
+              ),
+            ],
+          ),
+          if (_isGeneratingImage)
+            Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Generating skeleton image...',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildKeyPositionsList() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _keyPositionNames.length,
-      itemBuilder: (context, index) {
-        final positionName = _keyPositionNames[index];
-        final isMarked = _markedPositions.containsKey(positionName);
-        final markedFrame =
-            isMarked ? _markedPositions[positionName]!.frameIndex : null;
-
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          color: isMarked ? Colors.green[50] : null,
-          child: ListTile(
-            leading: Checkbox(
-              value: isMarked,
-              onChanged: null,
-              activeColor: Colors.green,
-            ),
-            title: Text(
-              _formatPositionName(positionName),
-              style: TextStyle(
-                fontWeight: isMarked ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-            subtitle: isMarked
-                ? Text('Frame: $markedFrame',
-                    style: const TextStyle(color: Colors.green))
-                : null,
-            trailing: ElevatedButton(
-              onPressed: isMarked
-                  ? null
-                  : () => _markCurrentPosition(positionName),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isMarked ? Colors.grey : Colors.blue,
-              ),
-              child: Text(isMarked ? 'Marked' : 'Mark Now'),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  String _formatPositionName(String name) {
-    return name
-        .split('_')
-        .map((word) => word[0].toUpperCase() + word.substring(1))
-        .join(' ');
-  }
+    // Duplicate definition removed. Only the correct version above remains.
 
   @override
   void dispose() {

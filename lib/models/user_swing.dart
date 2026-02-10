@@ -46,13 +46,31 @@ class UserKeyPosition {
   final int timestampMs;
   final Map<String, Keypoint> keypoints;
   final DateTime markedAt;
+  final String? skeletonImagePath;
 
   UserKeyPosition({
     required this.frameIndex,
     required this.timestampMs,
     required this.keypoints,
     required this.markedAt,
+    this.skeletonImagePath,
   });
+
+  UserKeyPosition copyWith({
+    int? frameIndex,
+    int? timestampMs,
+    Map<String, Keypoint>? keypoints,
+    DateTime? markedAt,
+    String? skeletonImagePath,
+  }) {
+    return UserKeyPosition(
+      frameIndex: frameIndex ?? this.frameIndex,
+      timestampMs: timestampMs ?? this.timestampMs,
+      keypoints: keypoints ?? this.keypoints,
+      markedAt: markedAt ?? this.markedAt,
+      skeletonImagePath: skeletonImagePath ?? this.skeletonImagePath,
+    );
+  }
 }
 
 class FrameData {
