@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -14,19 +16,25 @@ class SwingReviewScreen extends StatefulWidget {
 class _SwingReviewScreenState extends State<SwingReviewScreen> {
   late final VideoPlayerController _videoController;
   bool _isInitialized = false;
+  Object? _initError;
 
   @override
   void initState() {
     super.initState();
-    _videoController = VideoPlayerController.asset(widget.userSwing.videoPath)
-      ..initialize().then((_) {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _isInitialized = true;
-        });
-      });
+    _videoController =
+        VideoPlayerController.file(File(widget.userSwing.videoPath));
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    try {
+      await _videoController.initialize();
+      if (!mounted) return;
+      setState(() => _isInitialized = true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _initError = e);
+    }
   }
 
   @override
@@ -40,12 +48,14 @@ class _SwingReviewScreenState extends State<SwingReviewScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Swing Review')),
       body: Center(
-        child: _isInitialized
-            ? AspectRatio(
-                aspectRatio: _videoController.value.aspectRatio,
-                child: VideoPlayer(_videoController),
-              )
-            : const CircularProgressIndicator(),
+        child: _initError != null
+            ? Text('Failed to load video: $_initError')
+            : _isInitialized
+                ? AspectRatio(
+                    aspectRatio: _videoController.value.aspectRatio,
+                    child: VideoPlayer(_videoController),
+                  )
+                : const CircularProgressIndicator(),
       ),
     );
   }

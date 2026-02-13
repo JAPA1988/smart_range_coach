@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
@@ -77,11 +80,23 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
   }
 
   Future<void> _analyzeVideo(String videoPath) async {
+    if (!mounted) return;
+    final videoFile = File(videoPath);
+    if (!await videoFile.exists()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Video file not found: $videoPath')),
+      );
+      return;
+    }
+
     try {
       final analysisService = VideoAnalysisService();
       final userSwing = await analysisService.analyzeVideo(
         videoPath,
         context: context,
+        showProgressDialog: true,
+        timeout: const Duration(minutes: 2),
       );
 
       if (!mounted) return;
@@ -90,6 +105,11 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
         MaterialPageRoute(
           builder: (_) => SwingReviewScreen(userSwing: userSwing),
         ),
+      );
+    } on TimeoutException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Analysis timed out: ${e.message ?? ''}')),
       );
     } catch (e) {
       if (!mounted) return;

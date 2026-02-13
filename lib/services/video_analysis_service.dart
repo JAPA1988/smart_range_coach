@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -15,9 +16,16 @@ class VideoAnalysisService {
   Future<UserSwing> analyzeVideo(
     String videoPath, {
     BuildContext? context,
+    bool showProgressDialog = true,
+    Duration timeout = const Duration(minutes: 2),
   }) async {
     if (context != null) {
-      await _runMoveNetAnalysis(context, videoPath);
+      await _runMoveNetAnalysis(
+        context,
+        videoPath,
+        showProgressDialog: showProgressDialog,
+        timeout: timeout,
+      );
     }
 
     final poseJsonPath = _poseJsonPath(videoPath);
@@ -45,33 +53,50 @@ class VideoAnalysisService {
 
   Future<void> _runMoveNetAnalysis(
     BuildContext context,
-    String videoPath,
-  ) async {
+    String videoPath, {
+    required bool showProgressDialog,
+    required Duration timeout,
+  }) async {
     bool dialogShown = false;
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Analyzing swing with MoveNet...'),
-            ],
-          ),
-        ),
-      );
-      dialogShown = true;
+    OverlayEntry? overlayEntry;
+    VideoPlayerController? tempController;
+    late final NavigatorState rootNavigator;
+    late final OverlayState overlayState;
 
-      await MoveNetManager.init();
+    final startedAt = DateTime.now();
+    try {
+      rootNavigator = Navigator.of(context, rootNavigator: true);
+      final overlay = Overlay.maybeOf(context);
+      if (overlay == null) {
+        throw Exception('No Overlay found in the provided context');
+      }
+      overlayState = overlay;
+
+      if (showProgressDialog) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Analyzing swing with MoveNet...'),
+              ],
+            ),
+          ),
+        );
+        dialogShown = true;
+      }
+
+      await MoveNetManager.init().timeout(const Duration(seconds: 20));
       if (MoveNetManager.interpreter == null) {
         throw Exception('MoveNet could not be loaded');
       }
 
-      final tempController = VideoPlayerController.file(File(videoPath));
-      await tempController.initialize();
+      tempController = VideoPlayerController.file(File(videoPath));
+      await tempController.initialize().timeout(const Duration(seconds: 20));
       await tempController.pause();
 
       final duration = tempController.value.duration;
@@ -79,7 +104,7 @@ class VideoAnalysisService {
       final videoHeight = tempController.value.size.height.toInt();
 
       final repaintKey = GlobalKey();
-      OverlayEntry? overlayEntry = OverlayEntry(
+      overlayEntry = OverlayEntry(
         builder: (_) => Positioned(
           left: -10000,
           top: -10000,
@@ -88,13 +113,12 @@ class VideoAnalysisService {
             child: SizedBox(
               width: videoWidth.toDouble(),
               height: videoHeight.toDouble(),
-              child: VideoPlayer(tempController),
+              child: VideoPlayer(tempController!),
             ),
           ),
         ),
       );
-
-      Overlay.of(context).insert(overlayEntry);
+      overlayState.insert(overlayEntry);
       await Future.delayed(const Duration(milliseconds: 400));
 
       final poseData = <Map<String, dynamic>>[];
@@ -105,6 +129,9 @@ class VideoAnalysisService {
       final totalFrames = (totalMs / frameIntervalMs).ceil();
 
       for (int frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+        if (DateTime.now().difference(startedAt) > timeout) {
+          throw TimeoutException('MoveNet analysis exceeded $timeout');
+        }
         final currentMs = frameIndex * frameIntervalMs;
         if (currentMs >= totalMs) break;
 
@@ -148,9 +175,6 @@ class VideoAnalysisService {
         }
       }
 
-      overlayEntry?.remove();
-      await tempController.dispose();
-
       if (poseData.isEmpty) {
         throw Exception('No valid pose frames detected');
       }
@@ -164,8 +188,10 @@ class VideoAnalysisService {
         'frames': poseData,
       }));
     } finally {
+      overlayEntry?.remove();
+      await tempController?.dispose();
       if (dialogShown) {
-        Navigator.of(context, rootNavigator: true).maybePop();
+        rootNavigator.maybePop();
       }
     }
   }
