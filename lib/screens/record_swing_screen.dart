@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
+import '../models/user_swing.dart';
 import '../services/video_analysis_service.dart';
 import 'swing_review_screen.dart';
 
@@ -111,12 +112,40 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Analysis timed out: ${e.message ?? ''}')),
       );
+
+      final fallbackSwing = _fallbackSwing(videoPath);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SwingReviewScreen(userSwing: fallbackSwing),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Analysis failed: $e')),
       );
+
+      final fallbackSwing = _fallbackSwing(videoPath);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SwingReviewScreen(userSwing: fallbackSwing),
+        ),
+      );
     }
+  }
+
+  UserSwing _fallbackSwing(String videoPath) {
+    final fileName = videoPath.split(Platform.pathSeparator).last;
+    final id = fileName.replaceAll('.mp4', '');
+    return UserSwing(
+      id: id,
+      videoPath: videoPath,
+      recordedAt: DateTime.now(),
+      frames: const [],
+      status: AnalysisStatus.failed,
+    );
   }
 
   @override

@@ -28,7 +28,7 @@ class _SwingReviewScreenState extends State<SwingReviewScreen> {
 
   Future<void> _initVideo() async {
     try {
-      await _videoController.initialize();
+      await _videoController.initialize().timeout(const Duration(seconds: 20));
       if (!mounted) return;
       setState(() => _isInitialized = true);
     } catch (e) {
