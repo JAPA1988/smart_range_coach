@@ -418,6 +418,207 @@ Future<Map<String, dynamic>> _resizeNormalize(Map<String, dynamic> args) async {
   };
 }
 
+int _luminanceFromRgbaTop(Uint8List rgba, int w, int x, int y) {
+  final idx = (y * w + x) * 4;
+  final r = rgba[idx];
+  final g = rgba[idx + 1];
+  final b = rgba[idx + 2];
+  return ((0.299 * r) + (0.587 * g) + (0.114 * b)).round();
+}
+
+Map<String, Object?> _detectLinesImprovedWorker(Map<String, dynamic> args) {
+  final Uint8List rgba = args['rgba'] as Uint8List;
+  final int w = args['w'] as int;
+  final int h = args['h'] as int;
+
+  final int targetW = 320;
+  int scale = (w / targetW).ceil();
+  if (scale < 1) scale = 1;
+  if (scale > w) scale = w;
+  final int sw = (w / scale).ceil();
+  final int sh = (h / scale).ceil();
+
+  final List<int> L = List<int>.filled(sw * sh, 0);
+  for (int yy = 0; yy < sh; yy++) {
+    final int oy = (yy * scale).clamp(0, h - 1);
+    for (int xx = 0; xx < sw; xx++) {
+      final int ox = (xx * scale).clamp(0, w - 1);
+      L[yy * sw + xx] = _luminanceFromRgbaTop(rgba, w, ox, oy);
+    }
+  }
+
+  double sum = 0;
+  for (final v in L) {
+    sum += v;
+  }
+  final double mean = sum / L.length;
+  double varSum = 0;
+  for (final v in L) {
+    varSum += (v - mean) * (v - mean);
+  }
+  final double std = (varSum / L.length);
+  final double stdDev = std > 0 ? (math.sqrt(std)) : 0.0;
+  final int thresh = (stdDev * 0.6).round().clamp(8, 48);
+
+  final List<int> mask = List<int>.filled(sw * sh, 0);
+  for (int i = 0; i < L.length; i++) {
+    mask[i] = ((L[i] - mean).abs() > thresh) ? 1 : 0;
+  }
+
+  final visited = List<int>.filled(sw * sh, 0);
+  int bestCount = 0;
+  int bestLabel = -1;
+  final List<int> labels = List<int>.filled(sw * sh, 0);
+  int label = 0;
+  final q = <int>[];
+  for (int y = 0; y < sh; y++) {
+    for (int x = 0; x < sw; x++) {
+      final idx = y * sw + x;
+      if (mask[idx] == 0 || visited[idx] == 1) continue;
+      label++;
+      int cnt = 0;
+      q.clear();
+      q.add(idx);
+      visited[idx] = 1;
+      labels[idx] = label;
+      while (q.isNotEmpty) {
+        final cur = q.removeLast();
+        cnt++;
+        final cy = cur ~/ sw;
+        final cx = cur % sw;
+        for (int oyOff = -1; oyOff <= 1; oyOff++) {
+          for (int oxOff = -1; oxOff <= 1; oxOff++) {
+            final nx = cx + oxOff;
+            final ny = cy + oyOff;
+            if (nx < 0 || nx >= sw || ny < 0 || ny >= sh) continue;
+            final nidx = ny * sw + nx;
+            if (visited[nidx] == 1) continue;
+            if (mask[nidx] == 0) continue;
+            visited[nidx] = 1;
+            labels[nidx] = label;
+            q.add(nidx);
+          }
+        }
+      }
+      if (cnt > bestCount) {
+        bestCount = cnt;
+        bestLabel = label;
+      }
+    }
+  }
+
+  if (bestCount < 40) {
+    return <String, Object?>{};
+  }
+
+  int minx = sw, miny = sh, maxx = 0, maxy = 0;
+  for (int y = 0; y < sh; y++) {
+    for (int x = 0; x < sw; x++) {
+      final idx = y * sw + x;
+      if (labels[idx] == bestLabel) {
+        if (x < minx) minx = x;
+        if (x > maxx) maxx = x;
+        if (y < miny) miny = y;
+        if (y > maxy) maxy = y;
+      }
+    }
+  }
+
+  int bestRow = miny;
+  int bestWidth = 0;
+  final int searchTop = miny;
+  final int searchBottom = miny + ((maxy - miny) / 2).floor();
+  for (int y = searchTop; y <= searchBottom; y++) {
+    int left = -1, right = -1;
+    for (int x = minx; x <= maxx; x++) {
+      if (labels[y * sw + x] == bestLabel) {
+        if (left == -1) left = x;
+        right = x;
+      }
+    }
+    if (left != -1) {
+      final wspan = right - left;
+      if (wspan > bestWidth) {
+        bestWidth = wspan;
+        bestRow = y;
+      }
+    }
+  }
+
+  int leftShoulder = -1, rightShoulder = -1;
+  for (int x = minx; x <= maxx; x++) {
+    if (labels[bestRow * sw + x] == bestLabel) {
+      if (leftShoulder == -1) leftShoulder = x;
+      rightShoulder = x;
+    }
+  }
+
+  int bestCol = minx;
+  int bestColCount = -1;
+  for (int x = minx; x <= maxx; x++) {
+    int c = 0;
+    for (int y = miny; y <= maxy; y++) {
+      if (labels[y * sw + x] == bestLabel) c++;
+    }
+    if (c > bestColCount) {
+      bestColCount = c;
+      bestCol = x;
+    }
+  }
+
+  final List<Map<String, double>> pts = [];
+  final int yStart = miny + ((maxy - miny) * 0.4).floor();
+  final int yEnd = maxy;
+  for (int y = yStart; y <= yEnd; y++) {
+    for (int x = minx; x <= maxx; x++) {
+      if (labels[y * sw + x] != bestLabel) continue;
+      final int lx = (x - 1).clamp(0, sw - 1);
+      final int rx = (x + 1).clamp(0, sw - 1);
+      final int uy = (y - 1).clamp(0, sh - 1);
+      final int dy = (y + 1).clamp(0, sh - 1);
+      final int gx = (L[y * sw + rx] - L[y * sw + lx]).abs();
+      final int gy = (L[dy * sw + x] - L[uy * sw + x]).abs();
+      final int g = gx + gy;
+      if (g > 40) {
+        pts.add({'x': (x * scale).toDouble(), 'y': (y * scale).toDouble()});
+      }
+    }
+  }
+
+  List<Map<String, double>>? shaftLine;
+  if (pts.length >= 6) {
+    double sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    for (final p in pts) {
+      sumX += p['x']!;
+      sumY += p['y']!;
+      sumXY += p['x']! * p['y']!;
+      sumXX += p['x']! * p['x']!;
+    }
+    final n = pts.length.toDouble();
+    final denom = (n * sumXX - sumX * sumX);
+    if (denom.abs() >= 1e-6) {
+      final a = (n * sumXY - sumX * sumY) / denom;
+      final b = (sumY - a * sumX) / n;
+      final x1 = (minx * scale + 0.0);
+      final x2 = (maxx * scale + 0.0);
+      final y1 = a * x1 + b;
+      final y2 = a * x2 + b;
+      shaftLine = [
+        {'x': x1, 'y': y1},
+        {'x': x2, 'y': y2},
+      ];
+    }
+  }
+
+  return {
+    'shoulderRow': bestRow * scale,
+    'spineCol': bestCol * scale,
+    'leftShoulderX': (leftShoulder >= 0) ? leftShoulder * scale : -1,
+    'rightShoulderX': (rightShoulder >= 0) ? rightShoulder * scale : -1,
+    'shaftPoints': shaftLine,
+  };
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const CameraSmokeTestApp());
@@ -520,6 +721,25 @@ class SwingQuickReviewScreen extends StatefulWidget {
 }
 
 class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
+  static const List<String> _trackedKeypointNames = [
+    'left_shoulder',
+    'right_shoulder',
+    'left_elbow',
+    'right_elbow',
+    'left_wrist',
+    'right_wrist',
+    'left_hip',
+    'right_hip',
+    'left_knee',
+    'right_knee',
+  ];
+  static const List<String> _armKeypointNames = [
+    'left_elbow',
+    'right_elbow',
+    'left_wrist',
+    'right_wrist',
+  ];
+
   VideoPlayerController? _controller;
   bool _loading = true;
   bool _videoReady = false;
@@ -534,7 +754,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   // MoveNet UI / export state
   bool _useMoveNet = true;
   bool _skeletonOnlyMode = false;
-  double _minKeypointScore = 0.3;
+  double _minKeypointScore = 0.2;
 
   // NEU: Nutze PoseFrame statt Map
   List<PoseFrame>? _poseFrames;
@@ -559,8 +779,14 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   Map<String, Offset?>? _allKeypoints;
   // Smoothing für flüssigere Bewegung
   final Map<String, Offset?> _smoothedKeypoints = {};
+  final Map<String, int> _missingKeypointStreak = {};
+  final Map<String, Keypoint> _lastStableArmKeypoints = {};
+  Duration _lastArmObservationTime = Duration.zero;
   final double _smoothingFactor =
       0.1; // 0 = keine Smoothing, 1 = maximales Smoothing (reduziert für schnellere Reaktion)
+  final int _maxHoldMissingFrames = 4;
+  final int _armHoldMs = 500;
+  final double _analysisCapturePixelRatio = 1.25;
 
   // Latency Compensator für Predictive Leading
   final _latencyCompensator = LatencyCompensator();
@@ -582,6 +808,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
   // Vorberechnete Schulter-Positionen
   List<Map<String, dynamic>>? _precomputedShoulders;
+
+  Duration get _videoPosition => _controller?.value.position ?? Duration.zero;
+  Duration get _videoDuration => _controller?.value.duration ?? Duration.zero;
 
   // Simple detected line model (normalized coordinates 0..1)
   // p1/p2 are relative to image width/height (0..1)
@@ -868,6 +1097,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       setState(() {
         _currentPoseFrame = null; // ← Zeige NICHTS an!
       });
+      _lastStableArmKeypoints.clear();
       return;
     }
 
@@ -877,6 +1107,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       setState(() {
         _currentPoseFrame = null; // ← Zeige NICHTS mehr an!
       });
+      _lastStableArmKeypoints.clear();
       return;
     }
 
@@ -899,8 +1130,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     );
 
     if (exact != null) {
+      final stableFrame =
+          exact.isValid ? _stabilizeArmKeypoints(exact, currentTime) : null;
       setState(() {
-        _currentPoseFrame = exact.isValid ? exact : null;
+        _currentPoseFrame = stableFrame;
       });
       return;
     }
@@ -945,8 +1178,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final keypointsMap =
             interpolated.keypoints.map((k, v) => MapEntry(k, v.toJson()));
         if (PoseValidator.isBodyPresent(keypointsMap)) {
+          final stableFrame = _stabilizeArmKeypoints(interpolated, currentTime);
           setState(() {
-            _currentPoseFrame = interpolated;
+            _currentPoseFrame = stableFrame;
           });
           return;
         }
@@ -966,15 +1200,67 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     }
 
     // Nur nutzen wenn nicht zu weit weg (max 200ms)
+    final stableNearest = (nearest != null && minDiff < 200)
+        ? _stabilizeArmKeypoints(nearest, currentTime)
+        : null;
     setState(() {
-      _currentPoseFrame = (nearest != null && minDiff < 200) ? nearest : null;
+      _currentPoseFrame = stableNearest;
     });
+  }
+
+  PoseFrame _stabilizeArmKeypoints(PoseFrame frame, Duration currentTime) {
+    final merged = Map<String, Keypoint>.from(frame.keypoints);
+    bool sawVisibleArm = false;
+
+    for (final name in _armKeypointNames) {
+      final kp = merged[name];
+      if (kp != null && kp.isVisible) {
+        _lastStableArmKeypoints[name] = kp;
+        sawVisibleArm = true;
+      }
+    }
+
+    if (sawVisibleArm) {
+      _lastArmObservationTime = currentTime;
+      return frame;
+    }
+
+    final holdAgeMs =
+        (currentTime - _lastArmObservationTime).inMilliseconds.abs();
+    if (holdAgeMs > _armHoldMs) {
+      return frame;
+    }
+
+    for (final name in _armKeypointNames) {
+      final existing = merged[name];
+      if (existing != null && existing.isVisible) continue;
+      final held = _lastStableArmKeypoints[name];
+      if (held == null) continue;
+      merged[name] = Keypoint(
+        label: held.label,
+        x: held.x,
+        y: held.y,
+        confidence: math.max(
+          held.confidence * 0.9,
+          PoseValidator.minKeypointConfidence,
+        ),
+      );
+    }
+
+    return PoseFrame(
+      timestamp: frame.timestamp,
+      frameIndex: frame.frameIndex,
+      keypoints: merged,
+      qualityScore: frame.qualityScore,
+    );
   }
 
   /// Predictive Smoothing für flüssigere Bewegung
   void _applySmoothingToKeypoints(Map<String, Offset?> rawKeypoints) {
-    rawKeypoints.forEach((name, newPos) {
+    for (final name in _trackedKeypointNames) {
+      final newPos = rawKeypoints[name];
       if (newPos != null) {
+        _missingKeypointStreak[name] = 0;
         final oldPos = _smoothedKeypoints[name];
 
         if (oldPos == null) {
@@ -987,8 +1273,14 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
             oldPos.dy * _smoothingFactor + newPos.dy * (1 - _smoothingFactor),
           );
         }
+      } else {
+        final missCount = (_missingKeypointStreak[name] ?? 0) + 1;
+        _missingKeypointStreak[name] = missCount;
+        if (missCount > _maxHoldMissingFrames + 2) {
+          _smoothedKeypoints.remove(name);
+        }
       }
-    });
+    }
   }
 
   /// Interpoliert zwischen zwei Keypoint-Sets basierend auf Faktor t (0.0 - 1.0)
@@ -998,22 +1290,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     required double t,
     required Size videoSize,
   }) {
-    const keypointNames = [
-      'left_shoulder',
-      'right_shoulder',
-      'left_elbow',
-      'right_elbow',
-      'left_wrist',
-      'right_wrist',
-      'left_hip',
-      'right_hip',
-      'left_knee',
-      'right_knee',
-    ];
-
     final interpolated = <String, Offset?>{};
 
-    for (final name in keypointNames) {
+    for (final name in _trackedKeypointNames) {
       final beforeKp = frameBefore['keypoints']?[name];
       final afterKp = frameAfter['keypoints']?[name];
 
@@ -1025,14 +1304,19 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
             (beforeKp['y'] as double) * (1 - t) + (afterKp['y'] as double) * t;
 
         interpolated[name] = Offset(x * videoSize.width, y * videoSize.height);
+      } else if (beforeKp != null) {
+        interpolated[name] = Offset((beforeKp['x'] as double) * videoSize.width,
+            (beforeKp['y'] as double) * videoSize.height);
+      } else if (afterKp != null) {
+        interpolated[name] = Offset((afterKp['x'] as double) * videoSize.width,
+            (afterKp['y'] as double) * videoSize.height);
       }
     }
 
     return interpolated;
   }
 
-  final int _movenetInputSize =
-      192; // Lightning: 192x192 statt Thunder: 256x256
+  int _movenetInputSize = 256;
 
   Future<void> _initVideo() async {
     setState(() {
@@ -1125,7 +1409,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
   void _ensureShoulderTimerRunning() {
     // Nur starten wenn KEINE vorberechneten Daten vorhanden sind
-    if (_precomputedShoulders != null) {
+    // und keine PoseFrames verfügbar sind.
+    if (_precomputedShoulders != null ||
+        (_poseFrames != null && _poseFrames!.isNotEmpty)) {
       if (kDebugMode)
         debugPrint('Using pre-computed shoulders, skipping live tracking');
       return;
@@ -1161,13 +1447,19 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       final renderObj = _videoRepaintKey.currentContext?.findRenderObject();
       if (renderObj is! RenderRepaintBoundary) return;
       final boundary = renderObj;
-      final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
-      final byteData =
-          await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (byteData == null) return;
-      final rgba = byteData.buffer.asUint8List();
+      final ui.Image captured =
+          await boundary.toImage(pixelRatio: _analysisCapturePixelRatio);
       final w = captured.width;
       final h = captured.height;
+      ByteData? byteData;
+      try {
+        byteData =
+            await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+      } finally {
+        captured.dispose();
+      }
+      if (byteData == null) return;
+      final rgba = byteData.buffer.asUint8List();
       // remember captured image size for accurate mapping to canvas
       _lastCapturedImageSize = Size(w.toDouble(), h.toDouble());
 
@@ -1243,13 +1535,19 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       final renderObj = _videoRepaintKey.currentContext?.findRenderObject();
       if (renderObj is! RenderRepaintBoundary) return;
       final boundary = renderObj;
-      final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
-      final byteData =
-          await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (byteData == null) return;
-      final rgba = byteData.buffer.asUint8List();
+      final ui.Image captured =
+          await boundary.toImage(pixelRatio: _analysisCapturePixelRatio);
       final w = captured.width;
       final h = captured.height;
+      ByteData? byteData;
+      try {
+        byteData =
+            await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+      } finally {
+        captured.dispose();
+      }
+      if (byteData == null) return;
+      final rgba = byteData.buffer.asUint8List();
       // remember captured image size for accurate mapping to canvas
       _lastCapturedImageSize = Size(w.toDouble(), h.toDouble());
       List<DetectedLine> detected = [];
@@ -1331,12 +1629,25 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
       // If MoveNet did not produce results, fall back to the improved heuristic detector
       if (detected.isEmpty) {
-        final improved = _detectLinesImprovedFromRgba(rgba, w, h);
+        final improved = await compute(_detectLinesImprovedWorker, {
+          'rgba': rgba,
+          'w': w,
+          'h': h,
+        });
         final int shoulderRow = (improved['shoulderRow'] as int?) ?? -1;
         final int spineCol = (improved['spineCol'] as int?) ?? -1;
         final int leftShoulderX = (improved['leftShoulderX'] as int?) ?? -1;
         final int rightShoulderX = (improved['rightShoulderX'] as int?) ?? -1;
-        final List<Offset>? shaft = improved['shaftPoints'] as List<Offset>?;
+        List<Offset>? shaft;
+        final rawShaft = improved['shaftPoints'] as List<dynamic>?;
+        if (rawShaft != null && rawShaft.length >= 2) {
+          shaft = rawShaft
+              .map((p) => Offset(
+                    (p['x'] as num).toDouble(),
+                    (p['y'] as num).toDouble(),
+                  ))
+              .toList();
+        }
 
         if (leftShoulderX >= 0 && rightShoulderX >= 0) {
           detected.add(DetectedLine(
@@ -1453,126 +1764,139 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       _movenetCallCount = 0;
       _movenetLastLog = DateTime.now();
     }
-    try {
-      final int size = _movenetInputSize;
-      // Build input using bilinear resize in an Isolate (center-crop -> resize)
-      final Map<String, dynamic> prep = await compute(_resizeNormalize, {
-        'rgba': rgba,
-        'w': w,
-        'h': h,
-        'size': size,
-        'centerCrop': _centerCropEnabled
-      });
-      final inputImage = prep['image'] as List<List<List<double>>>;
-      final crop = prep['crop'] as Map<String, dynamic>;
-      final int cropX = crop['x'] as int;
-      final int cropY = crop['y'] as int;
-      final int cropW = crop['w'] as int;
-      final int cropH = crop['h'] as int;
-      // store last crop for debug overlay mapping
-      _lastCrop = {'x': cropX, 'y': cropY, 'w': cropW, 'h': cropH};
-      // Konvertiere zu Uint8List (256x256x3 = 196608 bytes)
-      final Uint8List uint8Input = Uint8List(size * size * 3);
-      int idx = 0;
-      for (int ty = 0; ty < size; ty++) {
-        for (int tx = 0; tx < size; tx++) {
-          for (int c = 0; c < 3; c++) {
-            uint8Input[idx++] =
-                (inputImage[ty][tx][c] * 255).round().clamp(0, 255);
+    final sizesToTry =
+        _movenetInputSize == 192 ? const [192] : <int>[_movenetInputSize, 192];
+
+    for (final size in sizesToTry) {
+      try {
+        final Map<String, dynamic> prep = await compute(_resizeNormalize, {
+          'rgba': rgba,
+          'w': w,
+          'h': h,
+          'size': size,
+          'centerCrop': _centerCropEnabled
+        });
+        final inputImage = prep['image'] as List<List<List<double>>>;
+        final crop = prep['crop'] as Map<String, dynamic>;
+        final int cropX = crop['x'] as int;
+        final int cropY = crop['y'] as int;
+        final int cropW = crop['w'] as int;
+        final int cropH = crop['h'] as int;
+        _lastCrop = {'x': cropX, 'y': cropY, 'w': cropW, 'h': cropH};
+
+        final Uint8List uint8Input = Uint8List(size * size * 3);
+        int idx = 0;
+        for (int ty = 0; ty < size; ty++) {
+          for (int tx = 0; tx < size; tx++) {
+            for (int c = 0; c < 3; c++) {
+              uint8Input[idx++] =
+                  (inputImage[ty][tx][c] * 255).round().clamp(0, 255);
+            }
           }
         }
+
+        final input =
+            uint8Input.buffer.asUint8List().reshape([1, size, size, 3]);
+        final output = List.generate(
+            1,
+            (_) => List.generate(
+                1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
+
+        MoveNetManager.interpreter!.run(input, output);
+        if (_movenetInputSize != size) {
+          _movenetInputSize = size;
+          if (kDebugMode) debugPrint('MoveNet input size fallback to $size');
+        }
+
+        final List<Map<String, double>> kps = [];
+        final out0 = output[0][0];
+        for (int i = 0; i < 17; i++) {
+          final y = out0[i][0];
+          final x = out0[i][1];
+          final score = out0[i][2];
+          final double origX = (cropX + x * cropW) / w;
+          final double origY = (cropY + y * cropH) / h;
+          kps.add({'y': origY, 'x': origX, 'score': score});
+        }
+        return kps;
+      } catch (e) {
+        if (kDebugMode) debugPrint('MoveNet run error (size=$size): $e');
       }
-
-      // Reshape zu [1, size, size, 3] für TFLite
-      final input = uint8Input.buffer.asUint8List().reshape([1, size, size, 3]);
-      final output = List.generate(
-          1,
-          (_) => List.generate(
-              1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
-
-      MoveNetManager.interpreter!.run(input, output);
-
-      final List<Map<String, double>> kps = [];
-      final out0 = output[0][0];
-      for (int i = 0; i < 17; i++) {
-        final y = out0[i][0];
-        final x = out0[i][1];
-        final score = out0[i][2];
-        // remap from model-input (cropped square) normalized coords back to original image normalized coords
-        final double origX = (cropX + x * cropW) / w;
-        final double origY = (cropY + y * cropH) / h;
-        kps.add({'y': origY, 'x': origX, 'score': score});
-      }
-      return kps;
-    } catch (e) {
-      if (kDebugMode) debugPrint('MoveNet run error: $e');
-      return null;
     }
+    return null;
   }
 
   // Variant of MoveNet runner that also returns the raw output (for debugging)
   Future<Map<String, Object?>?> _runMoveNetWithRaw(
       Uint8List rgba, int w, int h) async {
     if (MoveNetManager.interpreter == null) return null;
-    try {
-      final int size = _movenetInputSize;
-      final Map<String, dynamic> prep = await compute(_resizeNormalize, {
-        'rgba': rgba,
-        'w': w,
-        'h': h,
-        'size': size,
-        'centerCrop': _centerCropEnabled
-      });
-      final inputImage = prep['image'] as List<List<List<double>>>;
-      final crop = prep['crop'] as Map<String, dynamic>;
-      final int cropX = crop['x'] as int;
-      final int cropY = crop['y'] as int;
-      final int cropW = crop['w'] as int;
-      final int cropH = crop['h'] as int;
-      // store last crop for debug overlay mapping
-      _lastCrop = {'x': cropX, 'y': cropY, 'w': cropW, 'h': cropH};
+    final sizesToTry =
+        _movenetInputSize == 192 ? const [192] : <int>[_movenetInputSize, 192];
 
-      // Konvertiere zu Uint8List
-      final Uint8List uint8Input = Uint8List(size * size * 3);
-      int idx = 0;
-      for (int ty = 0; ty < size; ty++) {
-        for (int tx = 0; tx < size; tx++) {
-          for (int c = 0; c < 3; c++) {
-            uint8Input[idx++] =
-                (inputImage[ty][tx][c] * 255).round().clamp(0, 255);
+    for (final size in sizesToTry) {
+      try {
+        final Map<String, dynamic> prep = await compute(_resizeNormalize, {
+          'rgba': rgba,
+          'w': w,
+          'h': h,
+          'size': size,
+          'centerCrop': _centerCropEnabled
+        });
+        final inputImage = prep['image'] as List<List<List<double>>>;
+        final crop = prep['crop'] as Map<String, dynamic>;
+        final int cropX = crop['x'] as int;
+        final int cropY = crop['y'] as int;
+        final int cropW = crop['w'] as int;
+        final int cropH = crop['h'] as int;
+        _lastCrop = {'x': cropX, 'y': cropY, 'w': cropW, 'h': cropH};
+
+        final Uint8List uint8Input = Uint8List(size * size * 3);
+        int idx = 0;
+        for (int ty = 0; ty < size; ty++) {
+          for (int tx = 0; tx < size; tx++) {
+            for (int c = 0; c < 3; c++) {
+              uint8Input[idx++] =
+                  (inputImage[ty][tx][c] * 255).round().clamp(0, 255);
+            }
           }
         }
+
+        final input =
+            uint8Input.buffer.asUint8List().reshape([1, size, size, 3]);
+        final output = List.generate(
+            1,
+            (_) => List.generate(
+                1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
+        MoveNetManager.interpreter!.run(input, output);
+        if (_movenetInputSize != size) {
+          _movenetInputSize = size;
+          if (kDebugMode) debugPrint('MoveNet input size fallback to $size');
+        }
+
+        final List<Map<String, double>> kps = [];
+        final List<List<double>> raw = [];
+        final out0 = output[0][0];
+        for (int i = 0; i < 17; i++) {
+          final y = out0[i][0];
+          final x = out0[i][1];
+          final score = out0[i][2];
+          raw.add([y, x, score]);
+          final double origX = (cropX + x * cropW) / w;
+          final double origY = (cropY + y * cropH) / h;
+          kps.add({'y': origY, 'x': origX, 'score': score});
+        }
+
+        return {
+          'keypoints': kps,
+          'raw': raw,
+          'crop': {'x': cropX, 'y': cropY, 'w': cropW, 'h': cropH}
+        };
+      } catch (e) {
+        if (kDebugMode)
+          debugPrint('MoveNet run error (with raw, size=$size): $e');
       }
-
-      final input = uint8Input.buffer.asUint8List().reshape([1, size, size, 3]);
-      final output = List.generate(
-          1,
-          (_) => List.generate(
-              1, (_) => List.generate(17, (_) => List.filled(3, 0.0))));
-      MoveNetManager.interpreter!.run(input, output);
-
-      final List<Map<String, double>> kps = [];
-      final List<List<double>> raw = [];
-      final out0 = output[0][0];
-      for (int i = 0; i < 17; i++) {
-        final y = out0[i][0];
-        final x = out0[i][1];
-        final score = out0[i][2];
-        raw.add([y, x, score]);
-        final double origX = (cropX + x * cropW) / w;
-        final double origY = (cropY + y * cropH) / h;
-        kps.add({'y': origY, 'x': origX, 'score': score});
-      }
-
-      return {
-        'keypoints': kps,
-        'raw': raw,
-        'crop': {'x': cropX, 'y': cropY, 'w': cropW, 'h': cropH}
-      };
-    } catch (e) {
-      if (kDebugMode) debugPrint('MoveNet run error (with raw): $e');
-      return null;
     }
+    return null;
   }
 
   Future<void> _exportLastResults() async {
@@ -1622,13 +1946,19 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       final renderObj = _videoRepaintKey.currentContext?.findRenderObject();
       if (renderObj is! RenderRepaintBoundary) return;
       final boundary = renderObj;
-      final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
-      final byteData =
-          await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (byteData == null) return;
-      final rgba = byteData.buffer.asUint8List();
+      final ui.Image captured =
+          await boundary.toImage(pixelRatio: _analysisCapturePixelRatio);
       final w = captured.width;
       final h = captured.height;
+      ByteData? byteData;
+      try {
+        byteData =
+            await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+      } finally {
+        captured.dispose();
+      }
+      if (byteData == null) return;
+      final rgba = byteData.buffer.asUint8List();
 
       final Map<String, Object?> outDoc = {};
       outDoc['timestamp'] = DateTime.now().toIso8601String();
@@ -1763,7 +2093,11 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         } catch (_) {}
       } else {
         try {
-          final improved = _detectLinesImprovedFromRgba(rgba, w, h);
+          final improved = await compute(_detectLinesImprovedWorker, {
+            'rgba': rgba,
+            'w': w,
+            'h': h,
+          });
           detectedLinesForDump.add({
             'label': 'Shoulder',
             'p1': {
@@ -1780,7 +2114,16 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
             'p1': {'x': ((improved['spineCol'] as int? ?? -1) / w), 'y': 0.05},
             'p2': {'x': ((improved['spineCol'] as int? ?? -1) / w), 'y': 0.95}
           });
-          final List<Offset>? shaft = improved['shaftPoints'] as List<Offset>?;
+          List<Offset>? shaft;
+          final rawShaft = improved['shaftPoints'] as List<dynamic>?;
+          if (rawShaft != null && rawShaft.length >= 2) {
+            shaft = rawShaft
+                .map((p) => Offset(
+                      (p['x'] as num).toDouble(),
+                      (p['y'] as num).toDouble(),
+                    ))
+                .toList();
+          }
           if (shaft != null && shaft.length >= 2) {
             detectedLinesForDump.add({
               'label': 'Shaft',
@@ -2134,7 +2477,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 ),
                               ),
                             // NEU: Nutze PoseOverlayPainter mit PoseFrame
-                            if (_currentPoseFrame != null)
+                            if (!_analysisRunning && _currentPoseFrame != null)
                               Positioned.fill(
                                 child: CustomPaint(
                                   painter:
@@ -2142,7 +2485,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 ),
                               ),
                             // Keypoints overlay (if available - Fallback für alte Daten)
-                            if (_lastKeypoints != null &&
+                            if (!_analysisRunning &&
+                                _lastKeypoints != null &&
                                 _currentPoseFrame == null)
                               Positioned.fill(
                                 child: CustomPaint(
@@ -2155,7 +2499,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 ),
                               ),
                             // Persistent body markers (ALT - nur wenn kein PoseFrame verfügbar)
-                            if (_allKeypoints != null &&
+                            if (!_analysisRunning &&
+                                _allKeypoints != null &&
                                 _allKeypoints!.isNotEmpty &&
                                 _currentPoseFrame == null)
                               Positioned.fill(
@@ -2168,7 +2513,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 ),
                               ),
                             // Debug-Widget für Pose-Status
-                            if (kDebugMode && _controller != null)
+                            if (kDebugMode &&
+                                !_analysisRunning &&
+                                _controller != null)
                               Positioned(
                                 top: 10,
                                 left: 10,
@@ -2210,7 +2557,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 ),
                               ),
                             // Crop debug overlay
-                            if (_lastCrop != null)
+                            if (!_analysisRunning && _lastCrop != null)
                               Positioned.fill(
                                 child: CustomPaint(
                                   painter: _CropPainter(
@@ -2356,6 +2703,39 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                         ),
                       ),
                     ),
+                  ),
+
+                if (_controller != null && _controller!.value.isInitialized)
+                  Column(
+                    children: [
+                      Slider(
+                        value: _videoDuration.inMilliseconds == 0
+                            ? 0
+                            : _videoPosition.inMilliseconds.toDouble(),
+                        min: 0,
+                        max: _videoDuration.inMilliseconds.toDouble(),
+                        onChanged: (v) {
+                          _controller
+                              ?.seekTo(Duration(milliseconds: v.toInt()));
+                        },
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _videoPosition.toString().split('.').first,
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                            Text(
+                              _videoDuration.toString().split('.').first,
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
 
                 // Minimal controls
@@ -2728,8 +3108,13 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
           if (boundary == null) continue;
 
           final image = await boundary.toImage(pixelRatio: 1.0);
-          final byteData =
-              await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+          ByteData? byteData;
+          try {
+            byteData =
+                await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+          } finally {
+            image.dispose();
+          }
           if (byteData == null) continue;
 
           final rgba = byteData.buffer.asUint8List();
@@ -3768,14 +4153,19 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
 
           final boundary = renderObj;
           final ui.Image captured = await boundary.toImage(pixelRatio: 1.0);
-          final byteData =
-              await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+          final w = captured.width;
+          final h = captured.height;
+          ByteData? byteData;
+          try {
+            byteData =
+                await captured.toByteData(format: ui.ImageByteFormat.rawRgba);
+          } finally {
+            captured.dispose();
+          }
 
           if (byteData == null) continue;
 
           final rgba = byteData.buffer.asUint8List();
-          final w = captured.width;
-          final h = captured.height;
 
           // MoveNet Inferenz
           final cropData = _prepareMoveNetInput(rgba, w, h,
