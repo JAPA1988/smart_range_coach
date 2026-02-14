@@ -239,6 +239,27 @@ class _CropPainter extends CustomPainter {
       old.crop != crop || old.imageSize != imageSize;
 }
 
+class _ReviewGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white24
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    const int divisions = 8;
+    for (int i = 1; i < divisions; i++) {
+      final dx = size.width * (i / divisions);
+      final dy = size.height * (i / divisions);
+      canvas.drawLine(Offset(dx, 0), Offset(dx, size.height), paint);
+      canvas.drawLine(Offset(0, dy), Offset(size.width, dy), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReviewGridPainter oldDelegate) => false;
+}
+
 // Painter für alle relevanten Golf-Keypoints
 class _PoseKeyPointsPainter extends CustomPainter {
   final Map<String, Offset?>? keypoints;
@@ -512,6 +533,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   bool _analysisRunning = false;
   // MoveNet UI / export state
   bool _useMoveNet = true;
+  bool _skeletonOnlyMode = false;
   double _minKeypointScore = 0.3;
 
   // NEU: Nutze PoseFrame statt Map
@@ -2089,162 +2111,174 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                   ),
 
                 if (_videoReady && ctrl != null)
-                  AspectRatio(
-                    aspectRatio: ctrl.value.aspectRatio == 0
-                        ? 16 / 9
-                        : ctrl.value.aspectRatio,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        RepaintBoundary(
-                          key: _videoRepaintKey,
-                          child: VideoPlayer(ctrl),
-                        ),
-                        // NEU: Nutze PoseOverlayPainter mit PoseFrame
-                        if (_currentPoseFrame != null)
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: PoseOverlayPainter(_currentPoseFrame),
+                  Expanded(
+                    flex: 3,
+                    child: Center(
+                      child: AspectRatio(
+                        aspectRatio: ctrl.value.aspectRatio == 0
+                            ? 16 / 9
+                            : ctrl.value.aspectRatio,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            RepaintBoundary(
+                              key: _videoRepaintKey,
+                              child: _skeletonOnlyMode
+                                  ? Container(color: Colors.black)
+                                  : VideoPlayer(ctrl),
                             ),
-                          ),
-                        // Keypoints overlay (if available - Fallback für alte Daten)
-                        if (_lastKeypoints != null && _currentPoseFrame == null)
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: KeypointsPainter(
-                                  keypoints: _lastKeypoints!,
-                                  minScore: _minKeypointScore,
-                                  imageSize: _lastCapturedImageSize ??
-                                      Size(ctrl.value.size.width,
-                                          ctrl.value.size.height)),
-                            ),
-                          ),
-                        // Persistent body markers (ALT - nur wenn kein PoseFrame verfügbar)
-                        if (_allKeypoints != null &&
-                            _allKeypoints!.isNotEmpty &&
-                            _currentPoseFrame == null)
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _PoseKeyPointsPainter(
-                                  keypoints: _allKeypoints,
-                                  imageSize: _lastCapturedImageSize ??
-                                      Size(ctrl.value.size.width,
-                                          ctrl.value.size.height)),
-                            ),
-                          ),
-                        // Debug-Widget für Pose-Status
-                        if (kDebugMode && _controller != null)
-                          Positioned(
-                            top: 10,
-                            left: 10,
-                            child: Container(
-                              padding: EdgeInsets.all(8),
-                              color: Colors.black54,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Time: ${_controller!.value.position.inMilliseconds}ms',
-                                    style: TextStyle(
-                                        color: Colors.white, fontSize: 12),
-                                  ),
-                                  if (_poseFrames != null)
-                                    Text(
-                                      'Pose Frames: ${_poseFrames!.length}',
-                                      style: TextStyle(
-                                          color: Colors.white, fontSize: 12),
-                                    ),
-                                  if (_currentPoseFrame != null)
-                                    Text(
-                                      'Current Pose: ✅ (Q: ${(_currentPoseFrame!.qualityScore * 100).toStringAsFixed(0)}%)',
-                                      style: TextStyle(
-                                          color: Colors.green, fontSize: 12),
-                                    )
-                                  else
-                                    Text(
-                                      'Current Pose: ❌ No body detected',
-                                      style: TextStyle(
-                                          color: Colors.red, fontSize: 12),
-                                    ),
-                                ],
+                            if (_skeletonOnlyMode)
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: _ReviewGridPainter(),
+                                ),
                               ),
-                            ),
-                          ),
-                        // Crop debug overlay
-                        if (_lastCrop != null)
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _CropPainter(
-                                  crop: _lastCrop!,
-                                  imageSize: Size(ctrl.value.size.width,
-                                      ctrl.value.size.height)),
-                            ),
-                          ),
-                        // Large centered play button overlay when paused/still
-                        if (!(ctrl.value.isPlaying))
-                          Positioned.fill(
-                            child: Container(
-                              color: Colors.black26,
-                              child: Center(
-                                child: SizedBox(
-                                  width: 96,
-                                  height: 96,
-                                  child: ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      shape: const CircleBorder(),
-                                      backgroundColor: Colors.white70,
-                                      foregroundColor: Colors.black87,
-                                      elevation: 6,
-                                    ),
-                                    onPressed: () async {
-                                      try {
-                                        // If at end, rewind a bit or to start
-                                        final dur = ctrl.value.duration;
-                                        final pos = ctrl.value.position;
-                                        if (dur != Duration.zero &&
-                                            pos >=
-                                                dur -
-                                                    const Duration(
-                                                        milliseconds: 150)) {
-                                          await ctrl.seekTo(Duration.zero);
-                                        }
-                                        await ctrl.play();
-                                      } catch (e) {
-                                        if (kDebugMode)
-                                          debugPrint('Play overlay error: $e');
-                                      }
-                                      if (mounted) {
-                                        setState(() {});
-                                      }
-                                    },
-                                    child:
-                                        const Icon(Icons.play_arrow, size: 48),
+                            // NEU: Nutze PoseOverlayPainter mit PoseFrame
+                            if (_currentPoseFrame != null)
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter:
+                                      PoseOverlayPainter(_currentPoseFrame),
+                                ),
+                              ),
+                            // Keypoints overlay (if available - Fallback für alte Daten)
+                            if (_lastKeypoints != null &&
+                                _currentPoseFrame == null)
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: KeypointsPainter(
+                                      keypoints: _lastKeypoints!,
+                                      minScore: _minKeypointScore,
+                                      imageSize: _lastCapturedImageSize ??
+                                          Size(ctrl.value.size.width,
+                                              ctrl.value.size.height)),
+                                ),
+                              ),
+                            // Persistent body markers (ALT - nur wenn kein PoseFrame verfügbar)
+                            if (_allKeypoints != null &&
+                                _allKeypoints!.isNotEmpty &&
+                                _currentPoseFrame == null)
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: _PoseKeyPointsPainter(
+                                      keypoints: _allKeypoints,
+                                      imageSize: _lastCapturedImageSize ??
+                                          Size(ctrl.value.size.width,
+                                              ctrl.value.size.height)),
+                                ),
+                              ),
+                            // Debug-Widget für Pose-Status
+                            if (kDebugMode && _controller != null)
+                              Positioned(
+                                top: 10,
+                                left: 10,
+                                child: Container(
+                                  padding: EdgeInsets.all(8),
+                                  color: Colors.black54,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Time: ${_controller!.value.position.inMilliseconds}ms',
+                                        style: TextStyle(
+                                            color: Colors.white, fontSize: 12),
+                                      ),
+                                      if (_poseFrames != null)
+                                        Text(
+                                          'Pose Frames: ${_poseFrames!.length}',
+                                          style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12),
+                                        ),
+                                      if (_currentPoseFrame != null)
+                                        Text(
+                                          'Current Pose: ✅ (Q: ${(_currentPoseFrame!.qualityScore * 100).toStringAsFixed(0)}%)',
+                                          style: TextStyle(
+                                              color: Colors.green,
+                                              fontSize: 12),
+                                        )
+                                      else
+                                        Text(
+                                          'Current Pose: ❌ No body detected',
+                                          style: TextStyle(
+                                              color: Colors.red, fontSize: 12),
+                                        ),
+                                    ],
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
-                        // if we have detected lines, draw them as an overlay
-                        if (_detectedLines.isNotEmpty)
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: LinesPainter(lines: _detectedLines),
-                            ),
-                          ),
-                        // Prominent floating Analyse button at bottom-right of the video
-                        Positioned(
-                          bottom: 12,
-                          right: 12,
-                          child: FloatingActionButton.extended(
-                            heroTag: 'analyse_frame',
-                            backgroundColor: Colors.blueAccent,
-                            icon: const Icon(Icons.search),
-                            label: _analysisRunning
-                                ? const Text('Analysiere...')
-                                : const Text('Analyse'),
-                            onPressed:
-                                _analysisRunning || !ctrl.value.isInitialized
+                            // Crop debug overlay
+                            if (_lastCrop != null)
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: _CropPainter(
+                                      crop: _lastCrop!,
+                                      imageSize: Size(ctrl.value.size.width,
+                                          ctrl.value.size.height)),
+                                ),
+                              ),
+                            // Large centered play button overlay when paused/still
+                            if (!(ctrl.value.isPlaying))
+                              Positioned.fill(
+                                child: Container(
+                                  color: Colors.black26,
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 96,
+                                      height: 96,
+                                      child: ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          shape: const CircleBorder(),
+                                          backgroundColor: Colors.white70,
+                                          foregroundColor: Colors.black87,
+                                          elevation: 6,
+                                        ),
+                                        onPressed: () async {
+                                          try {
+                                            // If at end, rewind a bit or to start
+                                            final dur = ctrl.value.duration;
+                                            final pos = ctrl.value.position;
+                                            if (dur != Duration.zero &&
+                                                pos >=
+                                                    dur -
+                                                        const Duration(
+                                                            milliseconds:
+                                                                150)) {
+                                              await ctrl.seekTo(Duration.zero);
+                                            }
+                                            await ctrl.play();
+                                          } catch (e) {
+                                            if (kDebugMode)
+                                              debugPrint(
+                                                  'Play overlay error: $e');
+                                          }
+                                          if (mounted) {
+                                            setState(() {});
+                                          }
+                                        },
+                                        child: const Icon(Icons.play_arrow,
+                                            size: 48),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            // Detected lines are intentionally hidden in review UI.
+                            // Prominent floating Analyse button at bottom-right of the video
+                            Positioned(
+                              bottom: 12,
+                              right: 12,
+                              child: FloatingActionButton.extended(
+                                heroTag: 'analyse_frame',
+                                backgroundColor: Colors.blueAccent,
+                                icon: const Icon(Icons.search),
+                                label: _analysisRunning
+                                    ? const Text('Analysiere...')
+                                    : const Text('Analyse'),
+                                onPressed: _analysisRunning ||
+                                        !ctrl.value.isInitialized
                                     ? null
                                     : () async {
                                         try {
@@ -2258,66 +2292,69 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                             debugPrint('Analyse FAB error: $e');
                                         }
                                       },
-                          ),
-                        ),
-                        // Vergleich mit Profi Button
-                        Positioned(
-                          bottom: 80,
-                          right: 12,
-                          child: FloatingActionButton.extended(
-                            heroTag: 'compare_pro',
-                            backgroundColor: Colors.purple,
-                            icon: const Icon(Icons.compare_arrows),
-                            label: const Text('Vergleich'),
-                            onPressed: () async {
-                              final poseJsonPath = widget.videoPath
-                                  .replaceAll('.mp4', '_movenet_pose.json');
-                              final file = File(poseJsonPath);
+                              ),
+                            ),
+                            // Vergleich mit Profi Button
+                            Positioned(
+                              bottom: 80,
+                              right: 12,
+                              child: FloatingActionButton.extended(
+                                heroTag: 'compare_pro',
+                                backgroundColor: Colors.purple,
+                                icon: const Icon(Icons.compare_arrows),
+                                label: const Text('Vergleich'),
+                                onPressed: () async {
+                                  final poseJsonPath = widget.videoPath
+                                      .replaceAll('.mp4', '_movenet_pose.json');
+                                  final file = File(poseJsonPath);
 
-                              if (await file.exists()) {
-                                try {
-                                  final analysisService =
-                                      VideoAnalysisService();
-                                  final userSwing =
-                                      await analysisService.analyzeVideo(
-                                    widget.videoPath,
-                                  );
-                                  if (!mounted) return;
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => SwingComparisonScreen(
-                                        userSwing: userSwing,
+                                  if (await file.exists()) {
+                                    try {
+                                      final analysisService =
+                                          VideoAnalysisService();
+                                      final userSwing =
+                                          await analysisService.analyzeVideo(
+                                        widget.videoPath,
+                                      );
+                                      if (!mounted) return;
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => SwingComparisonScreen(
+                                            userSwing: userSwing,
+                                          ),
+                                        ),
+                                      );
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                              'Analyse laden fehlgeschlagen: $e'),
+                                        ),
+                                      );
+                                    }
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: const Text(
+                                            'Bitte zuerst Video mit MoveNet analysieren'),
+                                        action: SnackBarAction(
+                                          label: 'Analysieren',
+                                          onPressed: () async {
+                                            await _analyzeVideoAndSaveShoulders(
+                                                widget.videoPath);
+                                          },
+                                        ),
                                       ),
-                                    ),
-                                  );
-                                } catch (e) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                          'Analyse laden fehlgeschlagen: $e'),
-                                    ),
-                                  );
-                                }
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text(
-                                        'Bitte zuerst Video mit MoveNet analysieren'),
-                                    action: SnackBarAction(
-                                      label: 'Analysieren',
-                                      onPressed: () async {
-                                        await _analyzeVideoAndSaveShoulders(
-                                            widget.videoPath);
-                                      },
-                                    ),
-                                  ),
-                                );
-                              }
-                            },
-                          ),
+                                    );
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
 
@@ -2413,6 +2450,20 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Nur Raster + Punkte'),
+                          subtitle: const Text(
+                            'Schwarzer Hintergrund ohne aufgenommenes Video',
+                          ),
+                          value: _skeletonOnlyMode,
+                          onChanged: (value) {
+                            setState(() {
+                              _skeletonOnlyMode = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 8),
                         const Text('Markiere, was du in diesem Swing erkennst',
                             style: TextStyle(color: Colors.white70)),
                         const SizedBox(height: 8),
