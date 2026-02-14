@@ -24,6 +24,7 @@ import 'screens/record_swing_screen.dart';
 // Models
 import 'models/pose_validator.dart';
 import 'models/pose_frame.dart';
+import 'models/user_swing.dart' hide Keypoint;
 
 // Widgets
 import 'widgets/pose_overlay_painter.dart';
@@ -433,13 +434,26 @@ class HomeScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             ElevatedButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
+              onPressed: () async {
+                final nav = Navigator.of(context);
+                final result = await nav.push(
                   MaterialPageRoute(
-                    builder: (context) => const RecordSwingScreen(),
+                    builder: (_) => const RecordSwingScreen(),
                   ),
                 );
+
+                if (!context.mounted) return;
+
+                if (result is UserSwing) {
+                  nav.push(
+                    MaterialPageRoute(
+                      builder: (_) => SwingQuickReviewScreen(
+                        videoPath: result.videoPath,
+                        swingNumber: 1,
+                      ),
+                    ),
+                  );
+                }
               },
               icon: const Icon(Icons.videocam),
               label: const Text('Record New Swing'),
@@ -2262,7 +2276,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
                               if (await file.exists()) {
                                 try {
-                                  final analysisService = VideoAnalysisService();
+                                  final analysisService =
+                                      VideoAnalysisService();
                                   final userSwing =
                                       await analysisService.analyzeVideo(
                                     widget.videoPath,
@@ -2279,8 +2294,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                   if (!mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content:
-                                          Text('Analyse laden fehlgeschlagen: $e'),
+                                      content: Text(
+                                          'Analyse laden fehlgeschlagen: $e'),
                                     ),
                                   );
                                 }
@@ -3928,37 +3943,22 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
-            onPressed: () {
-              Navigator.of(context).push(
+            onPressed: () async {
+              final result = await Navigator.push(
+                context,
                 MaterialPageRoute(
                   builder: (_) => const RecordSwingScreen(),
                 ),
               );
+              if (!mounted) return;
+              if (result is UserSwing) {
+                setState(() {
+                  _lastSavedPath = result.videoPath;
+                });
+              }
             },
             tooltip: 'Record Swing',
             icon: const Icon(Icons.sports_golf),
-          ),
-          IconButton(
-            onPressed: () {
-              if (_lastSavedPath != null) {
-                final lp = _lastSavedPath!;
-                if (_isImagePath(lp)) {
-                  Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) =>
-                          PhotoReviewScreen(photoPath: lp, swingNumber: 1)));
-                } else {
-                  // treat as video (mp4/mov/etc.) and open video review screen
-                  Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => SwingQuickReviewScreen(
-                          videoPath: lp, swingNumber: 1)));
-                }
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Kein gespeichertes Foto/Video verfügbar')));
-              }
-            },
-            tooltip: 'Review (Foto/Video)',
-            icon: const Icon(Icons.rate_review),
           ),
         ],
       ),
@@ -4054,6 +4054,23 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
                         ),
                     ],
                   ),
+                  if (_lastSavedPath != null) ...[
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SwingQuickReviewScreen(
+                              videoPath: _lastSavedPath!,
+                              swingNumber: 1,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.rate_review),
+                      label: const Text('Review'),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerLeft,

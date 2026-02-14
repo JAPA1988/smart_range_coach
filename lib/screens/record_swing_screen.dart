@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../models/user_swing.dart';
 import '../services/video_analysis_service.dart';
-import 'swing_review_screen.dart';
 
 class RecordSwingScreen extends StatefulWidget {
   const RecordSwingScreen({super.key});
@@ -101,38 +100,24 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
       );
 
       if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SwingReviewScreen(userSwing: userSwing),
-        ),
-      );
+      // Statt Review-Screen direkt zu öffnen: Ergebnis zurückgeben
+      Navigator.pop(context, userSwing);
     } on TimeoutException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Analysis timed out: ${e.message ?? ''}')),
       );
-
       final fallbackSwing = _fallbackSwing(videoPath);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SwingReviewScreen(userSwing: fallbackSwing),
-        ),
-      );
+
+      // Auch im Fehlerfall zurückgeben
+      Navigator.pop(context, fallbackSwing);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Analysis failed: $e')),
       );
-
       final fallbackSwing = _fallbackSwing(videoPath);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SwingReviewScreen(userSwing: fallbackSwing),
-        ),
-      );
+      Navigator.pop(context, fallbackSwing);
     }
   }
 
