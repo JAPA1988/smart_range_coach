@@ -4363,7 +4363,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       cam,
       ResolutionPreset.low, // Reduzierte Auflösung für bessere Performance
       enableAudio: false,
-      fps: 120,
+      fps: 60,
     );
 
     setState(() {

@@ -17,7 +17,7 @@ class VideoAnalysisService {
     String videoPath, {
     BuildContext? context,
     bool showProgressDialog = true,
-    Duration timeout = const Duration(minutes: 2),
+    Duration timeout = const Duration(minutes: 5),
   }) async {
     if (kDebugMode) {
       debugPrint('ANALYSIS_START analyzeVideo path=$videoPath timeout=${timeout.inSeconds}s');
