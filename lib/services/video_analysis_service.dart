@@ -19,6 +19,9 @@ class VideoAnalysisService {
     bool showProgressDialog = true,
     Duration timeout = const Duration(minutes: 2),
   }) async {
+    if (kDebugMode) {
+      debugPrint('ANALYSIS_START analyzeVideo path=$videoPath timeout=${timeout.inSeconds}s');
+    }
     if (context != null) {
       await _runMoveNetAnalysis(
         context,
@@ -41,6 +44,10 @@ class VideoAnalysisService {
 
     final frames = framesJson.map(FrameData.fromJson).toList();
 
+    if (kDebugMode) {
+      debugPrint('ANALYSIS_DONE analyzeVideo frames=${frames.length} path=$videoPath');
+    }
+
     return UserSwing(
       id: _swingIdFromPath(videoPath),
       videoPath: videoPath,
@@ -58,6 +65,7 @@ class VideoAnalysisService {
     required Duration timeout,
   }) async {
     bool dialogShown = false;
+    bool dialogVisible = false;
     OverlayEntry? overlayEntry;
     VideoPlayerController? tempController;
     late final NavigatorState rootNavigator;
@@ -65,6 +73,9 @@ class VideoAnalysisService {
 
     final startedAt = DateTime.now();
     try {
+      if (kDebugMode) {
+        debugPrint('ANALYSIS_START runMoveNet path=$videoPath showDialog=$showProgressDialog');
+      }
       rootNavigator = Navigator.of(context, rootNavigator: true);
       final overlay = Overlay.maybeOf(context);
       if (overlay == null) {
@@ -86,8 +97,11 @@ class VideoAnalysisService {
               ],
             ),
           ),
-        );
+        ).whenComplete(() {
+          dialogVisible = false;
+        });
         dialogShown = true;
+        dialogVisible = true;
       }
 
       await MoveNetManager.init().timeout(const Duration(seconds: 20));
@@ -123,29 +137,43 @@ class VideoAnalysisService {
 
       final poseData = <Map<String, dynamic>>[];
 
-      const estimatedFps = 15;
-      final frameIntervalMs = (1000 / estimatedFps).round();
       final totalMs = duration.inMilliseconds;
-      final totalFrames = (totalMs / frameIntervalMs).ceil();
+      const baseFps = 60;
+      const highFps = 120;
+      bool useHighFps = false;
+      int analyzedFrameIndex = 0;
+      double currentMs = 0;
 
-      for (int frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+      while (currentMs < totalMs) {
         if (DateTime.now().difference(startedAt) > timeout) {
           throw TimeoutException('MoveNet analysis exceeded $timeout');
         }
-        final currentMs = frameIndex * frameIntervalMs;
-        if (currentMs >= totalMs) break;
 
-        await tempController.seekTo(Duration(milliseconds: currentMs));
+        final int fpsUsed = useHighFps ? highFps : baseFps;
+        final int currentFrameMs = currentMs.round();
+        if (currentFrameMs >= totalMs) break;
+
+        await tempController.seekTo(Duration(milliseconds: currentFrameMs));
         await Future.delayed(const Duration(milliseconds: 50));
 
         final boundary = repaintKey.currentContext?.findRenderObject()
             as RenderRepaintBoundary?;
-        if (boundary == null) continue;
+        if (boundary == null) {
+          currentMs += 1000 / fpsUsed;
+          continue;
+        }
 
         final image = await boundary.toImage(pixelRatio: 1.0);
-        final byteData =
-            await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-        if (byteData == null) continue;
+        ByteData? byteData;
+        try {
+          byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+        } finally {
+          image.dispose();
+        }
+        if (byteData == null) {
+          currentMs += 1000 / fpsUsed;
+          continue;
+        }
 
         final rgba = byteData.buffer.asUint8List();
         final result = await MoveNetManager.analyzePoseFromRGBA(
@@ -156,27 +184,46 @@ class VideoAnalysisService {
 
         if (result != null && result['keypoints'] != null) {
           final keypoints = result['keypoints'] as Map<String, dynamic>;
-          if (PoseValidator.isKeypointsValid(keypoints)) {
-            final quality = PoseValidator.calculatePoseQuality(keypoints);
-            poseData.add({
-              'timestamp_ms': currentMs,
-              'frame_index': frameIndex,
-              'fps_used': estimatedFps,
-              'keypoints': keypoints,
-              'quality_score': quality,
-            });
+          final frameValid = PoseValidator.isKeypointsValid(keypoints);
+          final quality = PoseValidator.calculatePoseQuality(keypoints);
+          poseData.add({
+            'timestamp_ms': currentFrameMs,
+            'frame_index': analyzedFrameIndex,
+            'fps_used': fpsUsed,
+            'keypoints': keypoints,
+            'quality_score': quality,
+            'frame_valid': frameValid,
+          });
+
+          if (!useHighFps && _handsAboveElbows(keypoints)) {
+            useHighFps = true;
+            if (kDebugMode) {
+              debugPrint(
+                  'MoveNet switched to 120 FPS at ${currentFrameMs}ms (hands above elbows)');
+            }
           }
         }
 
-        if (kDebugMode && frameIndex % 30 == 0) {
+        if (kDebugMode && analyzedFrameIndex % 30 == 0) {
           debugPrint(
-            'Analyzing frame $frameIndex/$totalFrames',
+            'Analyzing frame #$analyzedFrameIndex at ${fpsUsed}fps',
           );
         }
+
+        analyzedFrameIndex++;
+        currentMs += 1000 / fpsUsed;
       }
 
       if (poseData.isEmpty) {
         throw Exception('No valid pose frames detected');
+      }
+
+      if (kDebugMode) {
+        _logKeypointContinuityStats(poseData, tag: 'before_repair');
+      }
+      _enforceKeypointContinuity(poseData);
+      if (kDebugMode) {
+        _logKeypointContinuityStats(poseData, tag: 'after_repair');
       }
 
       final jsonPath = _poseJsonPath(videoPath);
@@ -187,18 +234,23 @@ class VideoAnalysisService {
         'analysis_method': 'overlay_simple',
         'frames': poseData,
       }));
+
+      if (kDebugMode) {
+        debugPrint('ANALYSIS_SAVED runMoveNet frames=${poseData.length} json=$jsonPath');
+      }
     } finally {
       overlayEntry?.remove();
       await tempController?.dispose();
-      if (dialogShown) {
+      if (dialogShown && dialogVisible) {
         rootNavigator.maybePop();
       }
     }
   }
 
   String _poseJsonPath(String videoPath) {
-    if (videoPath.toLowerCase().endsWith('.mp4')) {
-      return videoPath.replaceAll('.mp4', '_movenet_pose.json');
+    final mp4Suffix = RegExp(r'\.mp4$', caseSensitive: false);
+    if (mp4Suffix.hasMatch(videoPath)) {
+      return videoPath.replaceFirst(mp4Suffix, '_movenet_pose.json');
     }
     return '${videoPath}_movenet_pose.json';
   }
@@ -206,5 +258,206 @@ class VideoAnalysisService {
   String _swingIdFromPath(String videoPath) {
     final fileName = videoPath.split(Platform.pathSeparator).last;
     return fileName.replaceAll('.mp4', '');
+  }
+
+  bool _handsAboveElbows(Map<String, dynamic> keypoints) {
+    final leftWrist = keypoints['left_wrist'] as Map<String, dynamic>?;
+    final rightWrist = keypoints['right_wrist'] as Map<String, dynamic>?;
+    final leftElbow = keypoints['left_elbow'] as Map<String, dynamic>?;
+    final rightElbow = keypoints['right_elbow'] as Map<String, dynamic>?;
+
+    if (leftWrist == null ||
+        rightWrist == null ||
+        leftElbow == null ||
+        rightElbow == null) {
+      return false;
+    }
+
+    final lwY = (leftWrist['y'] as num?)?.toDouble();
+    final rwY = (rightWrist['y'] as num?)?.toDouble();
+    final leY = (leftElbow['y'] as num?)?.toDouble();
+    final reY = (rightElbow['y'] as num?)?.toDouble();
+
+    if (lwY == null || rwY == null || leY == null || reY == null) {
+      return false;
+    }
+
+    return lwY < leY && rwY < reY;
+  }
+
+  void _enforceKeypointContinuity(List<Map<String, dynamic>> frames) {
+    if (frames.isEmpty) return;
+
+    const minVisibleScore = PoseValidator.minKeypointConfidence;
+    const continuityScore = 0.22;
+    const keypointNames = [
+      'nose',
+      'left_eye',
+      'right_eye',
+      'left_ear',
+      'right_ear',
+      'left_shoulder',
+      'right_shoulder',
+      'left_elbow',
+      'right_elbow',
+      'left_wrist',
+      'right_wrist',
+      'left_hip',
+      'right_hip',
+      'left_knee',
+      'right_knee',
+      'left_ankle',
+      'right_ankle',
+    ];
+
+    for (final name in keypointNames) {
+      int? firstVisible;
+      int? lastVisible;
+
+      for (int i = 0; i < frames.length; i++) {
+        final keypoints = frames[i]['keypoints'] as Map<String, dynamic>?;
+        final kp = keypoints?[name] as Map<String, dynamic>?;
+        final score = (kp?['score'] as num?)?.toDouble() ?? 0.0;
+        if (score >= minVisibleScore) {
+          firstVisible ??= i;
+          lastVisible = i;
+        }
+      }
+
+      if (firstVisible == null ||
+          lastVisible == null ||
+          firstVisible == lastVisible) {
+        continue;
+      }
+
+      int repaired = 0;
+
+      for (int i = firstVisible; i < frames.length; i++) {
+        final keypoints = frames[i]['keypoints'] as Map<String, dynamic>?;
+        if (keypoints == null) continue;
+
+        final current = keypoints[name] as Map<String, dynamic>?;
+        final currentScore = (current?['score'] as num?)?.toDouble() ?? 0.0;
+        if (currentScore >= minVisibleScore) continue;
+
+        int? prevIdx;
+        for (int p = i - 1; p >= firstVisible; p--) {
+          final prevKps = frames[p]['keypoints'] as Map<String, dynamic>?;
+          final prev = prevKps?[name] as Map<String, dynamic>?;
+          final prevScore = (prev?['score'] as num?)?.toDouble() ?? 0.0;
+          if (prev != null && prevScore >= minVisibleScore) {
+            prevIdx = p;
+            break;
+          }
+        }
+
+        int? nextIdx;
+        for (int n = i + 1; n < frames.length; n++) {
+          final nextKps = frames[n]['keypoints'] as Map<String, dynamic>?;
+          final next = nextKps?[name] as Map<String, dynamic>?;
+          final nextScore = (next?['score'] as num?)?.toDouble() ?? 0.0;
+          if (next != null && nextScore >= minVisibleScore) {
+            nextIdx = n;
+            break;
+          }
+        }
+
+        if (prevIdx == null && nextIdx == null) continue;
+
+        double x;
+        double y;
+        double repairedScore;
+
+        if (prevIdx != null && nextIdx != null) {
+          final prevKp = (frames[prevIdx]['keypoints']
+              as Map<String, dynamic>)[name] as Map<String, dynamic>;
+          final nextKp = (frames[nextIdx]['keypoints']
+              as Map<String, dynamic>)[name] as Map<String, dynamic>;
+
+          final span = (nextIdx - prevIdx).toDouble();
+          final t = ((i - prevIdx) / span).clamp(0.0, 1.0);
+          final prevX = (prevKp['x'] as num).toDouble();
+          final prevY = (prevKp['y'] as num).toDouble();
+          final nextX = (nextKp['x'] as num).toDouble();
+          final nextY = (nextKp['y'] as num).toDouble();
+          x = prevX + (nextX - prevX) * t;
+          y = prevY + (nextY - prevY) * t;
+
+          final prevScore = (prevKp['score'] as num).toDouble();
+          final nextScore = (nextKp['score'] as num).toDouble();
+          repairedScore = ((prevScore + nextScore) * 0.5 * 0.85)
+              .clamp(continuityScore, 1.0);
+        } else if (prevIdx != null) {
+          final prevKp = (frames[prevIdx]['keypoints']
+              as Map<String, dynamic>)[name] as Map<String, dynamic>;
+          x = (prevKp['x'] as num).toDouble();
+          y = (prevKp['y'] as num).toDouble();
+          repairedScore = ((prevKp['score'] as num).toDouble() * 0.85)
+              .clamp(continuityScore, 1.0);
+        } else {
+          final nextKp = (frames[nextIdx!]['keypoints']
+              as Map<String, dynamic>)[name] as Map<String, dynamic>;
+          x = (nextKp['x'] as num).toDouble();
+          y = (nextKp['y'] as num).toDouble();
+          repairedScore = ((nextKp['score'] as num).toDouble() * 0.85)
+              .clamp(continuityScore, 1.0);
+        }
+
+        keypoints[name] = {
+          'x': x,
+          'y': y,
+          'score': repairedScore,
+        };
+        repaired++;
+      }
+
+      if (kDebugMode && repaired > 0) {
+        debugPrint('Continuity repair for $name: $repaired frames');
+      }
+    }
+  }
+
+  void _logKeypointContinuityStats(
+    List<Map<String, dynamic>> frames, {
+    required String tag,
+  }) {
+    const minVisibleScore = PoseValidator.minKeypointConfidence;
+    const keypointNames = [
+      'left_shoulder',
+      'right_shoulder',
+      'left_elbow',
+      'right_elbow',
+      'left_wrist',
+      'right_wrist',
+      'left_hip',
+      'right_hip',
+      'left_knee',
+      'right_knee',
+    ];
+
+    for (final name in keypointNames) {
+      int? firstVisible;
+      int visibleCount = 0;
+      int missingAfterFirst = 0;
+
+      for (int i = 0; i < frames.length; i++) {
+        final keypoints = frames[i]['keypoints'] as Map<String, dynamic>?;
+        final kp = keypoints?[name] as Map<String, dynamic>?;
+        final score = (kp?['score'] as num?)?.toDouble() ?? 0.0;
+        final visible = score >= minVisibleScore;
+
+        if (visible) {
+          firstVisible ??= i;
+          visibleCount++;
+        } else if (firstVisible != null) {
+          missingAfterFirst++;
+        }
+      }
+
+      if (firstVisible != null) {
+        debugPrint(
+            'Continuity[$tag] $name: visible=$visibleCount missing_after_first=$missingAfterFirst first=$firstVisible total=${frames.length}');
+      }
+    }
   }
 }

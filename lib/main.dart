@@ -658,6 +658,7 @@ class HomeScreen extends StatelessWidget {
             ElevatedButton.icon(
               onPressed: () async {
                 final nav = Navigator.of(context);
+                RecordSwingScreen.lastAnalyzedVideoPath = null;
                 final result = await nav.push(
                   MaterialPageRoute(
                     builder: (_) => const RecordSwingScreen(),
@@ -671,6 +672,16 @@ class HomeScreen extends StatelessWidget {
                     MaterialPageRoute(
                       builder: (_) => SwingQuickReviewScreen(
                         videoPath: result.videoPath,
+                        swingNumber: 1,
+                      ),
+                    ),
+                  );
+                } else if (RecordSwingScreen.lastAnalyzedVideoPath != null) {
+                  final fallbackPath = RecordSwingScreen.lastAnalyzedVideoPath!;
+                  nav.push(
+                    MaterialPageRoute(
+                      builder: (_) => SwingQuickReviewScreen(
+                        videoPath: fallbackPath,
                         swingNumber: 1,
                       ),
                     ),
@@ -765,7 +776,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   Map<String, int>? _lastCrop;
   bool _centerCropEnabled = true;
   // Shoulder tracking state (normalized coordinates 0..1)
-  bool _autoTrackShoulders = true;
+  bool _autoTrackShoulders = false;
   // stored as pixel coordinates relative to last captured image
   Offset? _leftShoulderMarker;
   Offset? _rightShoulderMarker;
@@ -781,11 +792,12 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   final Map<String, Offset?> _smoothedKeypoints = {};
   final Map<String, int> _missingKeypointStreak = {};
   final Map<String, Keypoint> _lastStableArmKeypoints = {};
-  Duration _lastArmObservationTime = Duration.zero;
+  final Map<String, Duration> _lastStableArmTimestamps = {};
   final double _smoothingFactor =
       0.1; // 0 = keine Smoothing, 1 = maximales Smoothing (reduziert für schnellere Reaktion)
   final int _maxHoldMissingFrames = 4;
-  final int _armHoldMs = 500;
+  final int _elbowHoldMs = 180;
+  final int _wristHoldMs = 240;
   final double _analysisCapturePixelRatio = 1.25;
 
   // Latency Compensator für Predictive Leading
@@ -830,8 +842,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
   Future<void> _loadPrecomputedPose() async {
     try {
-      final poseJsonPath =
-          widget.videoPath.replaceAll('.mp4', '_movenet_pose.json');
+        final poseJsonPath = _poseJsonPathFromVideoPath(widget.videoPath);
       final poseFile = File(poseJsonPath);
 
       if (await poseFile.exists()) {
@@ -843,21 +854,13 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final allFrames =
             framesJson.map((json) => PoseFrame.fromJson(json)).toList();
 
-        // Filtere nur valide Frames mit Körper
-        _poseFrames = allFrames.where((frame) {
-          if (!frame.isValid) return false;
-
-          // Prüfe ob Körper wirklich präsent ist
-          final keypointsMap =
-              frame.keypoints.map((k, v) => MapEntry(k, v.toJson()));
-          return PoseValidator.isBodyPresent(keypointsMap);
-        }).toList();
+        // Keine harte Filterung: alle Frames laden, damit temporär unsichere
+        // Keypoints (z. B. bei schnellen Bewegungen) nicht aus der Sequenz fallen.
+        _poseFrames = allFrames;
 
         if (kDebugMode) {
           debugPrint(
-              '✅ Loaded ${_poseFrames!.length} valid pose frames WITH body');
-          debugPrint(
-              '⚠️ Filtered out ${allFrames.length - _poseFrames!.length} frames WITHOUT body');
+              '✅ Loaded ${_poseFrames!.length} pose frames (unfiltered)');
 
           if (_poseFrames!.isNotEmpty) {
             final avgQuality = _poseFrames!
@@ -874,6 +877,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
           }
         }
 
+        if (!mounted) return;
         setState(() {});
       } else {
         if (kDebugMode) debugPrint('ℹ️ No pose data found');
@@ -1094,20 +1098,20 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
     // Edge case: Vor erstem Frame
     if (currentMs < _poseFrames!.first.timestamp.inMilliseconds) {
+      final firstFrame = _stabilizeArmKeypoints(_poseFrames!.first, currentTime);
       setState(() {
-        _currentPoseFrame = null; // ← Zeige NICHTS an!
+        _currentPoseFrame = firstFrame;
       });
-      _lastStableArmKeypoints.clear();
       return;
     }
 
     // Edge case: Nach letztem Frame
     if (currentMs > _poseFrames!.last.timestamp.inMilliseconds + 500) {
-      // +500ms Toleranz
+      final lastFrame =
+          _stabilizeArmKeypoints(_poseFrames!.last, _poseFrames!.last.timestamp);
       setState(() {
-        _currentPoseFrame = null; // ← Zeige NICHTS mehr an!
+        _currentPoseFrame = lastFrame;
       });
-      _lastStableArmKeypoints.clear();
       return;
     }
 
@@ -1130,16 +1134,15 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     );
 
     if (exact != null) {
-      final stableFrame =
-          exact.isValid ? _stabilizeArmKeypoints(exact, currentTime) : null;
+      final stableFrame = _stabilizeArmKeypoints(exact, currentTime);
       setState(() {
-        _currentPoseFrame = stableFrame;
+        _currentPoseFrame = _hasRenderablePose(stableFrame) ? stableFrame : null;
       });
       return;
     }
 
     // Interpoliere zwischen Frames
-    if (before != null && after != null && before.isValid && after.isValid) {
+    if (before != null && after != null) {
       final totalDuration =
           (after.timestamp.inMicroseconds - before.timestamp.inMicroseconds)
               .toDouble();
@@ -1174,10 +1177,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
               (after.qualityScore - before.qualityScore) * t,
         );
 
-        // Final validation
-        final keypointsMap =
-            interpolated.keypoints.map((k, v) => MapEntry(k, v.toJson()));
-        if (PoseValidator.isBodyPresent(keypointsMap)) {
+        if (_hasRenderablePose(interpolated)) {
           final stableFrame = _stabilizeArmKeypoints(interpolated, currentTime);
           setState(() {
             _currentPoseFrame = stableFrame;
@@ -1193,7 +1193,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
     for (final frame in _poseFrames!) {
       final diff = (frame.timestamp.inMilliseconds - currentMs).abs();
-      if (diff < minDiff && frame.isValid) {
+      if (diff < minDiff) {
         minDiff = diff;
         nearest = frame;
       }
@@ -1204,48 +1204,61 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         ? _stabilizeArmKeypoints(nearest, currentTime)
         : null;
     setState(() {
-      _currentPoseFrame = stableNearest;
+      _currentPoseFrame =
+          (stableNearest != null && _hasRenderablePose(stableNearest))
+              ? stableNearest
+              : null;
     });
+  }
+
+  bool _hasRenderablePose(PoseFrame frame) {
+    int visible = 0;
+    for (final kp in frame.keypoints.values) {
+      if (kp.isVisible) {
+        visible++;
+      }
+    }
+    return visible >= 3;
   }
 
   PoseFrame _stabilizeArmKeypoints(PoseFrame frame, Duration currentTime) {
     final merged = Map<String, Keypoint>.from(frame.keypoints);
-    bool sawVisibleArm = false;
+    bool changed = false;
 
     for (final name in _armKeypointNames) {
       final kp = merged[name];
       if (kp != null && kp.isVisible) {
         _lastStableArmKeypoints[name] = kp;
-        sawVisibleArm = true;
+        _lastStableArmTimestamps[name] = currentTime;
       }
-    }
-
-    if (sawVisibleArm) {
-      _lastArmObservationTime = currentTime;
-      return frame;
-    }
-
-    final holdAgeMs =
-        (currentTime - _lastArmObservationTime).inMilliseconds.abs();
-    if (holdAgeMs > _armHoldMs) {
-      return frame;
     }
 
     for (final name in _armKeypointNames) {
       final existing = merged[name];
       if (existing != null && existing.isVisible) continue;
+
       final held = _lastStableArmKeypoints[name];
+      final heldAt = _lastStableArmTimestamps[name];
       if (held == null) continue;
+      if (heldAt == null) continue;
+
+      final holdAgeMs = (currentTime - heldAt).inMilliseconds.abs();
+      final holdWindow = name.contains('wrist') ? _wristHoldMs : _elbowHoldMs;
+      if (holdAgeMs > holdWindow) continue;
+
       merged[name] = Keypoint(
         label: held.label,
         x: held.x,
         y: held.y,
         confidence: math.max(
-          held.confidence * 0.9,
+          held.confidence * 0.75,
           PoseValidator.minKeypointConfidence,
         ),
       );
+      changed = true;
     }
+
+    if (!changed) return frame;
 
     return PoseFrame(
       timestamp: frame.timestamp,
@@ -1408,6 +1421,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   }
 
   void _ensureShoulderTimerRunning() {
+    if (!_autoTrackShoulders) {
+      return;
+    }
+
     // Nur starten wenn KEINE vorberechneten Daten vorhanden sind
     // und keine PoseFrames verfügbar sind.
     if (_precomputedShoulders != null ||
@@ -2651,8 +2668,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 icon: const Icon(Icons.compare_arrows),
                                 label: const Text('Vergleich'),
                                 onPressed: () async {
-                                  final poseJsonPath = widget.videoPath
-                                      .replaceAll('.mp4', '_movenet_pose.json');
+                                    final poseJsonPath =
+                                      _poseJsonPathFromVideoPath(widget.videoPath);
                                   final file = File(poseJsonPath);
 
                                   if (await file.exists()) {
@@ -3085,7 +3102,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
       List<Map<String, dynamic>> poseData = [];
 
-      final estimatedFps = 15; // ← Von 120 auf 15!
+      final estimatedFps = 60;
       final frameIntervalMs = (1000 / estimatedFps).round();
       final totalMs = duration.inMilliseconds;
       final totalFrames = (totalMs / frameIntervalMs).ceil();
@@ -3155,7 +3172,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       await tempController.dispose();
 
       if (poseData.isNotEmpty) {
-        final jsonPath = videoPath.replaceAll('.mp4', '_movenet_pose.json');
+        final jsonPath = _poseJsonPathFromVideoPath(videoPath);
         await File(jsonPath).writeAsString(jsonEncode({
           'model': 'MoveNet Lightning',
           'analyzed_at': DateTime.now().toIso8601String(),
@@ -3357,7 +3374,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
       if (poseData.isNotEmpty) {
         // Vollständige Pose-Daten mit Metadata
-        final jsonPath = videoPath.replaceAll('.mp4', '_movenet_pose.json');
+        final jsonPath = _poseJsonPathFromVideoPath(videoPath);
         await File(jsonPath).writeAsString(jsonEncode({
           'model': 'MoveNet Lightning',
           'keypoint_count': 17,
@@ -3818,6 +3835,14 @@ bool _isImagePath(String p) {
       lower.endsWith('.webp');
 }
 
+String _poseJsonPathFromVideoPath(String videoPath) {
+  final mp4Suffix = RegExp(r'\.mp4$', caseSensitive: false);
+  if (mp4Suffix.hasMatch(videoPath)) {
+    return videoPath.replaceFirst(mp4Suffix, '_movenet_pose.json');
+  }
+  return '${videoPath}_movenet_pose.json';
+}
+
 class PhotoReviewScreen extends StatefulWidget {
   final String photoPath;
   final int swingNumber;
@@ -4058,6 +4083,8 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
         _isRecording = false;
         _lastSavedPath = savedPath;
       });
+
+      await _openReview(savedPath);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -4065,6 +4092,18 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
         _error = 'Stop recording failed: $e';
       });
     }
+  }
+
+  Future<void> _openReview(String videoPath) async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SwingQuickReviewScreen(
+          videoPath: videoPath,
+          swingNumber: 1,
+        ),
+      ),
+    );
   }
 
   Future<void> _analyzeVideoAndSaveShoulders(String videoPath) async {
@@ -4131,7 +4170,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
 
       // Frame-by-Frame Analyse mit MoveNet (120fps = 8.33ms)
       int frameCount = 0;
-      final estimatedFps = 15; // 8x weniger Frames = 5-8x schneller!
+      final estimatedFps = 60;
       final msPerFrame = 1000 / estimatedFps;
 
       if (kDebugMode)
@@ -4267,7 +4306,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
 
       // Speichere vollständige Pose-Daten
       if (poseData.isNotEmpty) {
-        final jsonPath = videoPath.replaceAll('.mp4', '_movenet_pose.json');
+        final jsonPath = _poseJsonPathFromVideoPath(videoPath);
         await File(jsonPath).writeAsString(jsonEncode({
           'video_path': videoPath,
           'analyzed_at': DateTime.now().toIso8601String(),
@@ -4324,6 +4363,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
       cam,
       ResolutionPreset.low, // Reduzierte Auflösung für bessere Performance
       enableAudio: false,
+      fps: 120,
     );
 
     setState(() {
@@ -4396,6 +4436,7 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
                 setState(() {
                   _lastSavedPath = result.videoPath;
                 });
+                await _openReview(result.videoPath);
               }
             },
             tooltip: 'Record Swing',

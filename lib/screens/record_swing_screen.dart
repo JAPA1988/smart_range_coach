@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/user_swing.dart';
 import '../services/video_analysis_service.dart';
 
 class RecordSwingScreen extends StatefulWidget {
+  static String? lastAnalyzedVideoPath;
+
   const RecordSwingScreen({super.key});
 
   @override
@@ -18,6 +21,7 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
   CameraController? _cameraController;
   List<CameraDescription>? _cameras;
   bool _isRecording = false;
+  bool _isAnalyzing = false;
   bool _isInitialized = false;
   String? _error;
 
@@ -40,6 +44,7 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
         camera,
         ResolutionPreset.high,
         enableAudio: false,
+        fps: 120,
       );
 
       await controller.initialize();
@@ -90,17 +95,23 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
       return;
     }
 
+    setState(() => _isAnalyzing = true);
+
     try {
       final analysisService = VideoAnalysisService();
       final userSwing = await analysisService.analyzeVideo(
         videoPath,
         context: context,
-        showProgressDialog: true,
+        showProgressDialog: false,
         timeout: const Duration(minutes: 2),
       );
 
       if (!mounted) return;
+      RecordSwingScreen.lastAnalyzedVideoPath = userSwing.videoPath;
       // Statt Review-Screen direkt zu öffnen: Ergebnis zurückgeben
+      if (kDebugMode) {
+        debugPrint('RecordSwingScreen returning UserSwing: ${userSwing.videoPath}');
+      }
       Navigator.pop(context, userSwing);
     } on TimeoutException catch (e) {
       if (!mounted) return;
@@ -108,8 +119,12 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
         SnackBar(content: Text('Analysis timed out: ${e.message ?? ''}')),
       );
       final fallbackSwing = _fallbackSwing(videoPath);
+      RecordSwingScreen.lastAnalyzedVideoPath = fallbackSwing.videoPath;
 
       // Auch im Fehlerfall zurückgeben
+      if (kDebugMode) {
+        debugPrint('RecordSwingScreen returning fallback UserSwing after timeout: ${fallbackSwing.videoPath}');
+      }
       Navigator.pop(context, fallbackSwing);
     } catch (e) {
       if (!mounted) return;
@@ -117,7 +132,15 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
         SnackBar(content: Text('Analysis failed: $e')),
       );
       final fallbackSwing = _fallbackSwing(videoPath);
+      RecordSwingScreen.lastAnalyzedVideoPath = fallbackSwing.videoPath;
+      if (kDebugMode) {
+        debugPrint('RecordSwingScreen returning fallback UserSwing after error: ${fallbackSwing.videoPath}');
+      }
       Navigator.pop(context, fallbackSwing);
+    } finally {
+      if (mounted) {
+        setState(() => _isAnalyzing = false);
+      }
     }
   }
 
@@ -168,15 +191,31 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                if (_isAnalyzing)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'ANALYZING... Bitte warten',
+                      style: TextStyle(
+                        color: Colors.lightBlueAccent,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: _isRecording ? _stopRecording : _startRecording,
+                  onPressed: _isAnalyzing
+                      ? null
+                      : (_isRecording ? _stopRecording : _startRecording),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _isRecording ? Colors.red : Colors.green,
                     minimumSize: const Size(200, 60),
                   ),
                   child: Text(
-                    _isRecording ? 'STOP' : 'RECORD',
+                    _isAnalyzing
+                        ? 'ANALYZING...'
+                        : (_isRecording ? 'STOP' : 'RECORD'),
                     style: const TextStyle(fontSize: 20),
                   ),
                 ),
