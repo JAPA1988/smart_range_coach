@@ -794,7 +794,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   final Map<String, Keypoint> _lastStableArmKeypoints = {};
   final Map<String, Duration> _lastStableArmTimestamps = {};
   final double _smoothingFactor =
-      0.1; // 0 = keine Smoothing, 1 = maximales Smoothing (reduziert für schnellere Reaktion)
+      0.3; // 0 = keine Smoothing, 1 = maximales Smoothing (reduziert für schnellere Reaktion)
+  final double _poseSmoothingFactor = 0.35;
+  final double _maxPoseJump = 0.08;
+  final Map<String, Keypoint> _smoothedPoseKeypoints = {};
   final int _maxHoldMissingFrames = 4;
   final int _elbowHoldMs = 180;
   final int _wristHoldMs = 240;
@@ -1099,8 +1102,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     // Edge case: Vor erstem Frame
     if (currentMs < _poseFrames!.first.timestamp.inMilliseconds) {
       final firstFrame = _stabilizeArmKeypoints(_poseFrames!.first, currentTime);
+      final smoothedFrame = _smoothPoseFrame(firstFrame);
       setState(() {
-        _currentPoseFrame = firstFrame;
+        _currentPoseFrame = smoothedFrame.isBodyPresent ? smoothedFrame : null;
       });
       return;
     }
@@ -1109,8 +1113,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     if (currentMs > _poseFrames!.last.timestamp.inMilliseconds + 500) {
       final lastFrame =
           _stabilizeArmKeypoints(_poseFrames!.last, _poseFrames!.last.timestamp);
+      final smoothedFrame = _smoothPoseFrame(lastFrame);
       setState(() {
-        _currentPoseFrame = lastFrame;
+        _currentPoseFrame = smoothedFrame.isBodyPresent ? smoothedFrame : null;
       });
       return;
     }
@@ -1135,8 +1140,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
     if (exact != null) {
       final stableFrame = _stabilizeArmKeypoints(exact, currentTime);
+      final smoothedFrame = _smoothPoseFrame(stableFrame);
       setState(() {
-        _currentPoseFrame = _hasRenderablePose(stableFrame) ? stableFrame : null;
+        _currentPoseFrame = smoothedFrame.isBodyPresent ? smoothedFrame : null;
       });
       return;
     }
@@ -1179,8 +1185,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
         if (_hasRenderablePose(interpolated)) {
           final stableFrame = _stabilizeArmKeypoints(interpolated, currentTime);
+          final smoothedFrame = _smoothPoseFrame(stableFrame);
           setState(() {
-            _currentPoseFrame = stableFrame;
+            _currentPoseFrame =
+                smoothedFrame.isBodyPresent ? smoothedFrame : null;
           });
           return;
         }
@@ -1203,12 +1211,55 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     final stableNearest = (nearest != null && minDiff < 200)
         ? _stabilizeArmKeypoints(nearest, currentTime)
         : null;
+    final smoothedNearest =
+        stableNearest != null ? _smoothPoseFrame(stableNearest) : null;
     setState(() {
       _currentPoseFrame =
-          (stableNearest != null && _hasRenderablePose(stableNearest))
-              ? stableNearest
+          (smoothedNearest != null && smoothedNearest.isBodyPresent)
+              ? smoothedNearest
               : null;
     });
+  }
+
+  PoseFrame _smoothPoseFrame(PoseFrame frame) {
+    final smoothed = <String, Keypoint>{};
+
+    for (final entry in frame.keypoints.entries) {
+      final name = entry.key;
+      final kp = entry.value;
+
+      final prev = _smoothedPoseKeypoints[name];
+      if (prev != null) {
+        final dx = (kp.x - prev.x).abs();
+        final dy = (kp.y - prev.y).abs();
+
+        if (dx > _maxPoseJump || dy > _maxPoseJump) {
+          smoothed[name] = prev;
+          continue;
+        }
+
+        smoothed[name] = Keypoint(
+          label: kp.label,
+          x: prev.x * _poseSmoothingFactor + kp.x * (1 - _poseSmoothingFactor),
+          y: prev.y * _poseSmoothingFactor + kp.y * (1 - _poseSmoothingFactor),
+          confidence: prev.confidence * _poseSmoothingFactor +
+              kp.confidence * (1 - _poseSmoothingFactor),
+        );
+      } else {
+        smoothed[name] = kp;
+      }
+    }
+
+    _smoothedPoseKeypoints
+      ..clear()
+      ..addAll(smoothed);
+
+    return PoseFrame(
+      timestamp: frame.timestamp,
+      frameIndex: frame.frameIndex,
+      keypoints: smoothed,
+      qualityScore: frame.qualityScore,
+    );
   }
 
   bool _hasRenderablePose(PoseFrame frame) {

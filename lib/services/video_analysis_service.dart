@@ -138,9 +138,7 @@ class VideoAnalysisService {
       final poseData = <Map<String, dynamic>>[];
 
       final totalMs = duration.inMilliseconds;
-      const baseFps = 60;
-      const highFps = 120;
-      bool useHighFps = false;
+      const analysisFps = 60;
       int analyzedFrameIndex = 0;
       double currentMs = 0;
 
@@ -149,7 +147,7 @@ class VideoAnalysisService {
           throw TimeoutException('MoveNet analysis exceeded $timeout');
         }
 
-        final int fpsUsed = useHighFps ? highFps : baseFps;
+        const int fpsUsed = analysisFps;
         final int currentFrameMs = currentMs.round();
         if (currentFrameMs >= totalMs) break;
 
@@ -184,23 +182,20 @@ class VideoAnalysisService {
 
         if (result != null && result['keypoints'] != null) {
           final keypoints = result['keypoints'] as Map<String, dynamic>;
-          final frameValid = PoseValidator.isKeypointsValid(keypoints);
+          final bodyPresent = PoseValidator.isBodyPresent(keypoints);
+          final frameValid =
+              bodyPresent && PoseValidator.isKeypointsValid(keypoints);
           final quality = PoseValidator.calculatePoseQuality(keypoints);
-          poseData.add({
-            'timestamp_ms': currentFrameMs,
-            'frame_index': analyzedFrameIndex,
-            'fps_used': fpsUsed,
-            'keypoints': keypoints,
-            'quality_score': quality,
-            'frame_valid': frameValid,
-          });
 
-          if (!useHighFps && _handsAboveElbows(keypoints)) {
-            useHighFps = true;
-            if (kDebugMode) {
-              debugPrint(
-                  'MoveNet switched to 120 FPS at ${currentFrameMs}ms (hands above elbows)');
-            }
+          if (frameValid) {
+            poseData.add({
+              'timestamp_ms': currentFrameMs,
+              'frame_index': analyzedFrameIndex,
+              'fps_used': fpsUsed,
+              'keypoints': keypoints,
+              'quality_score': quality,
+              'frame_valid': frameValid,
+            });
           }
         }
 
@@ -258,31 +253,6 @@ class VideoAnalysisService {
   String _swingIdFromPath(String videoPath) {
     final fileName = videoPath.split(Platform.pathSeparator).last;
     return fileName.replaceAll('.mp4', '');
-  }
-
-  bool _handsAboveElbows(Map<String, dynamic> keypoints) {
-    final leftWrist = keypoints['left_wrist'] as Map<String, dynamic>?;
-    final rightWrist = keypoints['right_wrist'] as Map<String, dynamic>?;
-    final leftElbow = keypoints['left_elbow'] as Map<String, dynamic>?;
-    final rightElbow = keypoints['right_elbow'] as Map<String, dynamic>?;
-
-    if (leftWrist == null ||
-        rightWrist == null ||
-        leftElbow == null ||
-        rightElbow == null) {
-      return false;
-    }
-
-    final lwY = (leftWrist['y'] as num?)?.toDouble();
-    final rwY = (rightWrist['y'] as num?)?.toDouble();
-    final leY = (leftElbow['y'] as num?)?.toDouble();
-    final reY = (rightElbow['y'] as num?)?.toDouble();
-
-    if (lwY == null || rwY == null || leY == null || reY == null) {
-      return false;
-    }
-
-    return lwY < leY && rwY < reY;
   }
 
   void _enforceKeypointContinuity(List<Map<String, dynamic>> frames) {

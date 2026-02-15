@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 
 class PoseValidator {
   // Confidence-Schwellwerte
-  static const double minKeypointConfidence = 0.2;
-  static const double minAverageConfidence = 0.3;
+  static const double minKeypointConfidence = 0.35;
+  static const double minAverageConfidence = 0.45;
 
   // Wichtige Keypoints für Golf-Analyse
   static const List<String> criticalKeypoints = [

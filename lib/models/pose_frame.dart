@@ -41,6 +41,10 @@ class PoseFrame {
   bool get isValid => PoseValidator.isKeypointsValid(
     keypoints.map((key, kp) => MapEntry(key, kp.toJson()))
   );
+
+  bool get isBodyPresent => PoseValidator.isBodyPresent(
+    keypoints.map((key, kp) => MapEntry(key, kp.toJson()))
+  );
   
   Keypoint? getKeypoint(String name) => keypoints[name];
 }
