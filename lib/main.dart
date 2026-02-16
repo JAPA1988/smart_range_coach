@@ -845,7 +845,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
   Future<void> _loadPrecomputedPose() async {
     try {
-        final poseJsonPath = _poseJsonPathFromVideoPath(widget.videoPath);
+      final poseJsonPath = _poseJsonPathFromVideoPath(widget.videoPath);
       final poseFile = File(poseJsonPath);
 
       if (await poseFile.exists()) {
@@ -1089,10 +1089,20 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   }
 
   void _updatePoseFromVideo() {
-    if (_poseFrames == null || _poseFrames!.isEmpty || _controller == null) {
+    void applyPoseFrame(PoseFrame? frame) {
       setState(() {
-        _currentPoseFrame = null;
+        if (frame != null && frame.isBodyPresent) {
+          _currentPoseFrame = frame;
+        } else {
+          _currentPoseFrame = null;
+          _allKeypoints = null;
+          _smoothedPoseKeypoints.clear();
+        }
       });
+    }
+
+    if (_poseFrames == null || _poseFrames!.isEmpty || _controller == null) {
+      applyPoseFrame(null);
       return;
     }
 
@@ -1101,22 +1111,19 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
     // Edge case: Vor erstem Frame
     if (currentMs < _poseFrames!.first.timestamp.inMilliseconds) {
-      final firstFrame = _stabilizeArmKeypoints(_poseFrames!.first, currentTime);
+      final firstFrame =
+          _stabilizeArmKeypoints(_poseFrames!.first, currentTime);
       final smoothedFrame = _smoothPoseFrame(firstFrame);
-      setState(() {
-        _currentPoseFrame = smoothedFrame.isBodyPresent ? smoothedFrame : null;
-      });
+      applyPoseFrame(smoothedFrame);
       return;
     }
 
     // Edge case: Nach letztem Frame
     if (currentMs > _poseFrames!.last.timestamp.inMilliseconds + 500) {
-      final lastFrame =
-          _stabilizeArmKeypoints(_poseFrames!.last, _poseFrames!.last.timestamp);
+      final lastFrame = _stabilizeArmKeypoints(
+          _poseFrames!.last, _poseFrames!.last.timestamp);
       final smoothedFrame = _smoothPoseFrame(lastFrame);
-      setState(() {
-        _currentPoseFrame = smoothedFrame.isBodyPresent ? smoothedFrame : null;
-      });
+      applyPoseFrame(smoothedFrame);
       return;
     }
 
@@ -1141,9 +1148,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     if (exact != null) {
       final stableFrame = _stabilizeArmKeypoints(exact, currentTime);
       final smoothedFrame = _smoothPoseFrame(stableFrame);
-      setState(() {
-        _currentPoseFrame = smoothedFrame.isBodyPresent ? smoothedFrame : null;
-      });
+      applyPoseFrame(smoothedFrame);
       return;
     }
 
@@ -1186,10 +1191,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         if (_hasRenderablePose(interpolated)) {
           final stableFrame = _stabilizeArmKeypoints(interpolated, currentTime);
           final smoothedFrame = _smoothPoseFrame(stableFrame);
-          setState(() {
-            _currentPoseFrame =
-                smoothedFrame.isBodyPresent ? smoothedFrame : null;
-          });
+          applyPoseFrame(smoothedFrame);
           return;
         }
       }
@@ -1213,12 +1215,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         : null;
     final smoothedNearest =
         stableNearest != null ? _smoothPoseFrame(stableNearest) : null;
-    setState(() {
-      _currentPoseFrame =
-          (smoothedNearest != null && smoothedNearest.isBodyPresent)
-              ? smoothedNearest
-              : null;
-    });
+    applyPoseFrame(smoothedNearest);
   }
 
   PoseFrame _smoothPoseFrame(PoseFrame frame) {
@@ -1233,10 +1230,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final dx = kp.x - prev.x;
         final dy = kp.y - prev.y;
 
-        final clampedX =
-            prev.x + dx.clamp(-_maxPoseJump, _maxPoseJump);
-        final clampedY =
-            prev.y + dy.clamp(-_maxPoseJump, _maxPoseJump);
+        final clampedX = prev.x + dx.clamp(-_maxPoseJump, _maxPoseJump);
+        final clampedY = prev.y + dy.clamp(-_maxPoseJump, _maxPoseJump);
 
         smoothed[name] = Keypoint(
           label: kp.label,
@@ -2570,6 +2565,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                               ),
                             // Persistent body markers (ALT - nur wenn kein PoseFrame verfügbar)
                             if (!_analysisRunning &&
+                                (_poseFrames == null || _poseFrames!.isEmpty) &&
                                 _allKeypoints != null &&
                                 _allKeypoints!.isNotEmpty &&
                                 _currentPoseFrame == null)
@@ -2721,8 +2717,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 icon: const Icon(Icons.compare_arrows),
                                 label: const Text('Vergleich'),
                                 onPressed: () async {
-                                    final poseJsonPath =
-                                      _poseJsonPathFromVideoPath(widget.videoPath);
+                                  final poseJsonPath =
+                                      _poseJsonPathFromVideoPath(
+                                          widget.videoPath);
                                   final file = File(poseJsonPath);
 
                                   if (await file.exists()) {
