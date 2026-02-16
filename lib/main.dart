@@ -796,7 +796,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   final double _smoothingFactor =
       0.3; // 0 = keine Smoothing, 1 = maximales Smoothing (reduziert für schnellere Reaktion)
   final double _poseSmoothingFactor = 0.35;
-  final double _maxPoseJump = 0.08;
+  final double _maxPoseJump = 0.20;
   final Map<String, Keypoint> _smoothedPoseKeypoints = {};
   final int _maxHoldMissingFrames = 4;
   final int _elbowHoldMs = 180;
@@ -1230,18 +1230,20 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
       final prev = _smoothedPoseKeypoints[name];
       if (prev != null) {
-        final dx = (kp.x - prev.x).abs();
-        final dy = (kp.y - prev.y).abs();
+        final dx = kp.x - prev.x;
+        final dy = kp.y - prev.y;
 
-        if (dx > _maxPoseJump || dy > _maxPoseJump) {
-          smoothed[name] = prev;
-          continue;
-        }
+        final clampedX =
+            prev.x + dx.clamp(-_maxPoseJump, _maxPoseJump);
+        final clampedY =
+            prev.y + dy.clamp(-_maxPoseJump, _maxPoseJump);
 
         smoothed[name] = Keypoint(
           label: kp.label,
-          x: prev.x * _poseSmoothingFactor + kp.x * (1 - _poseSmoothingFactor),
-          y: prev.y * _poseSmoothingFactor + kp.y * (1 - _poseSmoothingFactor),
+          x: prev.x * _poseSmoothingFactor +
+              clampedX * (1 - _poseSmoothingFactor),
+          y: prev.y * _poseSmoothingFactor +
+              clampedY * (1 - _poseSmoothingFactor),
           confidence: prev.confidence * _poseSmoothingFactor +
               kp.confidence * (1 - _poseSmoothingFactor),
         );
