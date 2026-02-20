@@ -1088,6 +1088,18 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     }
   }
 
+  bool _movenetBodyPresent(List<Map<String, double>> kps) {
+    if (kps.length < 13) return false;
+    final leftShoulder = kps[5]['score'] ?? 0.0;
+    final rightShoulder = kps[6]['score'] ?? 0.0;
+    final leftHip = kps[11]['score'] ?? 0.0;
+    final rightHip = kps[12]['score'] ?? 0.0;
+
+    return leftShoulder >= _minKeypointScore &&
+        rightShoulder >= _minKeypointScore &&
+        (leftHip >= _minKeypointScore || rightHip >= _minKeypointScore);
+  }
+
   void _updatePoseFromVideo() {
     void applyPoseFrame(PoseFrame? frame) {
       setState(() {
@@ -1096,6 +1108,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         } else {
           _currentPoseFrame = null;
           _allKeypoints = null;
+          _lastKeypoints = null;
           _smoothedPoseKeypoints.clear();
         }
       });
@@ -1737,8 +1750,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         }
       }
       final lines = detected;
-      // store last keypoints if available for export
-      if (kpRes != null && kpRes.isNotEmpty) {
+      // store last keypoints only when a body is confidently present
+      if (kpRes != null && kpRes.isNotEmpty && _movenetBodyPresent(kpRes)) {
         _lastKeypoints = kpRes;
       } else {
         _lastKeypoints = null;
@@ -2552,6 +2565,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                             // Keypoints overlay (if available - Fallback für alte Daten)
                             if (!_analysisRunning &&
                                 _lastKeypoints != null &&
+                                _movenetBodyPresent(_lastKeypoints!) &&
                                 _currentPoseFrame == null)
                               Positioned.fill(
                                 child: CustomPaint(
