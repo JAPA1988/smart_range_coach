@@ -1374,14 +1374,30 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     return true;
   }
 
+  PoseFrame? _closestPoseFrame(Duration target) {
+    if (_poseFrames == null || _poseFrames!.isEmpty) return null;
+    PoseFrame? best;
+    int bestDiff = 999999;
+
+    for (final frame in _poseFrames!) {
+      final diff = (frame.timestamp - target).inMilliseconds.abs();
+      if (diff < bestDiff) {
+        best = frame;
+        bestDiff = diff;
+      }
+    }
+
+    return best;
+  }
+
   void _toggleKeyPosition(KeyPosition position, bool enabled) {
     if (enabled) {
       if (!_canMarkKeyPosition()) return;
       final ctrl = _controller!;
-      final timestamp = ctrl.value.position;
-      final currentFrame = _currentPoseFrame!;
+      final closest =
+          _closestPoseFrame(ctrl.value.position) ?? _currentPoseFrame!;
       final copiedKeypoints = <String, Keypoint>{};
-      for (final entry in currentFrame.keypoints.entries) {
+      for (final entry in closest.keypoints.entries) {
         final kp = entry.value;
         copiedKeypoints[entry.key] = Keypoint(
           label: kp.label,
@@ -1391,15 +1407,15 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         );
       }
       final snapshot = PoseFrame(
-        timestamp: timestamp,
-        frameIndex: currentFrame.frameIndex,
+        timestamp: closest.timestamp,
+        frameIndex: closest.frameIndex,
         keypoints: copiedKeypoints,
-        qualityScore: currentFrame.qualityScore,
+        qualityScore: closest.qualityScore,
       );
 
       _markedKeyPositions[position] = KeyPositionSelection(
         poseFrame: snapshot,
-        videoPosition: timestamp,
+        videoPosition: snapshot.timestamp,
       );
     } else {
       _markedKeyPositions.remove(position);
@@ -1481,18 +1497,16 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     final captureRepaintKey = GlobalKey();
 
     try {
-      final boundary = _videoRepaintKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
-      if (boundary == null) {
-        throw Exception('Video boundary not ready');
-      }
-
-      final logicalSize = boundary.size;
       final pixelRatio = View.of(context).devicePixelRatio;
 
       captureController = VideoPlayerController.file(File(widget.videoPath));
       await captureController.initialize();
       await captureController.pause();
+
+      final captureSize = Size(
+        captureController.value.size.width,
+        captureController.value.size.height,
+      );
 
       captureOverlay = OverlayEntry(
         builder: (_) => Positioned(
@@ -1501,8 +1515,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
           child: RepaintBoundary(
             key: captureRepaintKey,
             child: SizedBox(
-              width: logicalSize.width,
-              height: logicalSize.height,
+              width: captureSize.width,
+              height: captureSize.height,
               child: VideoPlayer(captureController!),
             ),
           ),
@@ -1535,7 +1549,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
             await _captureRepaintBoundary(captureRepaintKey, pixelRatio);
         final raster = await _renderRasterImage(
           selection.poseFrame,
-          logicalSize,
+          captureSize,
           pixelRatio,
         );
 
