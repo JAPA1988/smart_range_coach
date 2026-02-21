@@ -177,10 +177,14 @@ String keyPositionSlug(KeyPosition p) {
 class KeyPositionSelection {
   final PoseFrame poseFrame;
   final Duration videoPosition;
+  final Uint8List imageBytes;
+  final Uint8List rasterBytes;
 
   KeyPositionSelection({
     required this.poseFrame,
     required this.videoPosition,
+    required this.imageBytes,
+    required this.rasterBytes,
   });
 }
 
@@ -1392,56 +1396,80 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
   void _toggleKeyPosition(KeyPosition position, bool enabled) {
     if (enabled) {
-      if (!_canMarkKeyPosition()) return;
-      final ctrl = _controller!;
-      final closest =
-          _closestPoseFrame(ctrl.value.position) ?? _currentPoseFrame!;
-      final copiedKeypoints = <String, Keypoint>{};
-      for (final entry in closest.keypoints.entries) {
-        final kp = entry.value;
-        copiedKeypoints[entry.key] = Keypoint(
-          label: kp.label,
-          x: kp.x,
-          y: kp.y,
-          confidence: kp.confidence,
-        );
-      }
-      final snapshot = PoseFrame(
-        timestamp: closest.timestamp,
-        frameIndex: closest.frameIndex,
-        keypoints: copiedKeypoints,
-        qualityScore: closest.qualityScore,
+      unawaited(_captureAndMarkKeyPosition(position));
+    } else {
+      _markedKeyPositions.remove(position);
+      setState(() {});
+    }
+  }
+
+  Future<void> _captureAndMarkKeyPosition(KeyPosition position) async {
+    if (!_canMarkKeyPosition()) return;
+
+    final ctrl = _controller!;
+    final closest =
+        _closestPoseFrame(ctrl.value.position) ?? _currentPoseFrame!;
+    final copiedKeypoints = <String, Keypoint>{};
+    for (final entry in closest.keypoints.entries) {
+      final kp = entry.value;
+      copiedKeypoints[entry.key] = Keypoint(
+        label: kp.label,
+        x: kp.x,
+        y: kp.y,
+        confidence: kp.confidence,
       );
+    }
+    final snapshot = PoseFrame(
+      timestamp: closest.timestamp,
+      frameIndex: closest.frameIndex,
+      keypoints: copiedKeypoints,
+      qualityScore: closest.qualityScore,
+    );
+
+    try {
+      final boundary = _videoRepaintKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) {
+        throw Exception('Video boundary not ready');
+      }
+
+      final pixelRatio = View.of(context).devicePixelRatio;
+      final captureSize = boundary.size;
+
+      final image = await _captureRepaintBoundary(_videoRepaintKey, pixelRatio);
+      final raster = await _renderRasterImage(
+        snapshot,
+        captureSize,
+        pixelRatio,
+      );
+
+      final imageByteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      final rasterByteData =
+          await raster.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      raster.dispose();
+
+      if (imageByteData == null || rasterByteData == null) {
+        throw Exception('Capture failed: no image bytes');
+      }
 
       _markedKeyPositions[position] = KeyPositionSelection(
         poseFrame: snapshot,
         videoPosition: snapshot.timestamp,
+        imageBytes: imageByteData.buffer.asUint8List(),
+        rasterBytes: rasterByteData.buffer.asUint8List(),
       );
-    } else {
-      _markedKeyPositions.remove(position);
-    }
-    setState(() {});
-  }
 
-  Future<void> _seekForCapture(
-      VideoPlayerController ctrl, Duration target) async {
-    await ctrl.pause();
-    await ctrl.seekTo(target);
-
-    for (int i = 0; i < 6; i++) {
-      await Future.delayed(const Duration(milliseconds: 16));
-      final diff = (ctrl.value.position - target).inMilliseconds.abs();
-      if (diff <= 20) {
-        await Future.delayed(const Duration(milliseconds: 40));
-        return;
+      if (mounted) {
+        setState(() {});
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Markierung fehlgeschlagen: $e')),
+      );
     }
-
-    await ctrl.play();
-    await Future.delayed(const Duration(milliseconds: 30));
-    await ctrl.pause();
-    await ctrl.seekTo(target);
-    await Future.delayed(const Duration(milliseconds: 40));
   }
 
   Future<ui.Image> _captureRepaintBoundary(
@@ -1480,51 +1508,13 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   Future<void> _saveKeyPositions() async {
     if (!_allKeyPositionsMarked || _savingKeyPositions) return;
 
-    final ctrl = _controller;
-    if (ctrl == null || !ctrl.value.isInitialized) return;
-
     setState(() => _savingKeyPositions = true);
-
-    final wasPlaying = ctrl.value.isPlaying;
-    final originalPos = ctrl.value.position;
-    await ctrl.pause();
 
     bool openViewer = false;
     String? viewerDir;
     String? viewerSwingId;
-    VideoPlayerController? captureController;
-    OverlayEntry? captureOverlay;
-    final captureRepaintKey = GlobalKey();
 
     try {
-      final pixelRatio = View.of(context).devicePixelRatio;
-
-      captureController = VideoPlayerController.file(File(widget.videoPath));
-      await captureController.initialize();
-      await captureController.pause();
-
-      final captureSize = Size(
-        captureController.value.size.width,
-        captureController.value.size.height,
-      );
-
-      captureOverlay = OverlayEntry(
-        builder: (_) => Positioned(
-          left: -10000,
-          top: -10000,
-          child: RepaintBoundary(
-            key: captureRepaintKey,
-            child: SizedBox(
-              width: captureSize.width,
-              height: captureSize.height,
-              child: VideoPlayer(captureController!),
-            ),
-          ),
-        ),
-      );
-      Overlay.of(context, rootOverlay: true).insert(captureOverlay);
-      await Future.delayed(const Duration(milliseconds: 120));
-
       final dir = await getApplicationDocumentsDirectory();
       final outDir = Directory(
           '${dir.path}${Platform.pathSeparator}smart_range_coach${Platform.pathSeparator}key_positions');
@@ -1542,17 +1532,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final position = entry.key;
         final selection = entry.value;
 
-        final target = selection.videoPosition;
-        await _seekForCapture(captureController, target);
-
-        final image =
-            await _captureRepaintBoundary(captureRepaintKey, pixelRatio);
-        final raster = await _renderRasterImage(
-          selection.poseFrame,
-          captureSize,
-          pixelRatio,
-        );
-
         final imagePath =
             '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.png';
         final rasterPath =
@@ -1560,19 +1539,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final jsonPath =
             '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.json';
 
-        final imageBytes =
-            await image.toByteData(format: ui.ImageByteFormat.png);
-        final rasterBytes =
-            await raster.toByteData(format: ui.ImageByteFormat.png);
-        image.dispose();
-        raster.dispose();
-
-        if (imageBytes != null) {
-          await File(imagePath).writeAsBytes(imageBytes.buffer.asUint8List());
-        }
-        if (rasterBytes != null) {
-          await File(rasterPath).writeAsBytes(rasterBytes.buffer.asUint8List());
-        }
+        await File(imagePath).writeAsBytes(selection.imageBytes);
+        await File(rasterPath).writeAsBytes(selection.rasterBytes);
 
         final keypointsJson = selection.poseFrame.keypoints.map((key, kp) {
           return MapEntry(key, {
@@ -1612,20 +1580,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         );
       }
     } finally {
-      try {
-        captureOverlay?.remove();
-      } catch (_) {}
-      try {
-        await captureController?.dispose();
-      } catch (_) {}
-
-      try {
-        await ctrl.seekTo(originalPos);
-        if (wasPlaying) {
-          await ctrl.play();
-        }
-      } catch (_) {}
-
       if (mounted) {
         setState(() => _savingKeyPositions = false);
       }
