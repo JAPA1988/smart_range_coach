@@ -19,6 +19,7 @@ import 'services/video_analysis_service.dart';
 import 'screens/swing_comparison_screen.dart';
 import 'screens/reference_swings_screen.dart';
 import 'screens/record_swing_screen.dart';
+import 'screens/key_positions_review_screen.dart';
 // import 'services/video_frame_extractor.dart'; // FFmpeg-basiert - nicht mehr verwendet
 
 // Models
@@ -1432,6 +1433,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     final originalPos = ctrl.value.position;
     await ctrl.pause();
 
+    bool openViewer = false;
+    String? viewerDir;
+    String? viewerSwingId;
+
     try {
       final boundary = _videoRepaintKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
@@ -1513,6 +1518,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         await File(jsonPath).writeAsString(jsonEncode(doc));
       }
 
+      openViewer = true;
+      viewerDir = outDir.path;
+      viewerSwingId = swingId;
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Key Positions gespeichert ✅')),
@@ -1534,6 +1543,17 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
       if (mounted) {
         setState(() => _savingKeyPositions = false);
+      }
+
+      if (mounted && openViewer && viewerDir != null && viewerSwingId != null) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => KeyPositionsReviewScreen(
+              swingId: viewerSwingId!,
+              directoryPath: viewerDir!,
+            ),
+          ),
+        );
       }
     }
   }
