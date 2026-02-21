@@ -4,6 +4,7 @@ class PoseValidator {
   // Confidence-Schwellwerte
   static const double minKeypointConfidence = 0.35;
   static const double minAverageConfidence = 0.45;
+  static const double minBodyPresenceConfidence = 0.25;
 
   // Wichtige Keypoints für Golf-Analyse
   static const List<String> criticalKeypoints = [
@@ -111,9 +112,17 @@ class PoseValidator {
     final leftHip = keypoints['left_hip'] as Map<String, dynamic>?;
     final rightHip = keypoints['right_hip'] as Map<String, dynamic>?;
 
-    final hasShoulders =
-        isKeypointVisible(leftShoulder) && isKeypointVisible(rightShoulder);
-    final hasHip = isKeypointVisible(leftHip) || isKeypointVisible(rightHip);
+    final leftShoulderScore =
+        (leftShoulder?['score'] as num?)?.toDouble() ?? 0.0;
+    final rightShoulderScore =
+        (rightShoulder?['score'] as num?)?.toDouble() ?? 0.0;
+    final leftHipScore = (leftHip?['score'] as num?)?.toDouble() ?? 0.0;
+    final rightHipScore = (rightHip?['score'] as num?)?.toDouble() ?? 0.0;
+
+    final hasShoulders = leftShoulderScore >= minBodyPresenceConfidence &&
+        rightShoulderScore >= minBodyPresenceConfidence;
+    final hasHip = leftHipScore >= minBodyPresenceConfidence ||
+        rightHipScore >= minBodyPresenceConfidence;
     if (!hasShoulders || !hasHip) return false;
 
     final leftShoulderX = (leftShoulder?['x'] as num?)?.toDouble();
@@ -129,16 +138,16 @@ class PoseValidator {
         rightShoulderY == null ||
         leftHipY == null ||
         rightHipY == null) {
-      return false;
+      return true;
     }
 
     final shoulderSpan = (leftShoulderX - rightShoulderX).abs();
-    if (shoulderSpan < 0.04 || shoulderSpan > 0.85) return false;
+    if (shoulderSpan < 0.015 || shoulderSpan > 0.95) return false;
 
     final shoulderCenterY = (leftShoulderY + rightShoulderY) / 2.0;
     final hipCenterY = (leftHipY + rightHipY) / 2.0;
     final torsoHeight = hipCenterY - shoulderCenterY;
-    if (torsoHeight < 0.03 || torsoHeight > 0.7) return false;
+    if (torsoHeight < 0.005 || torsoHeight > 0.9) return false;
 
     return true;
   }

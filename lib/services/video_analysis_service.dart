@@ -20,7 +20,8 @@ class VideoAnalysisService {
     Duration timeout = const Duration(minutes: 5),
   }) async {
     if (kDebugMode) {
-      debugPrint('ANALYSIS_START analyzeVideo path=$videoPath timeout=${timeout.inSeconds}s');
+      debugPrint(
+          'ANALYSIS_START analyzeVideo path=$videoPath timeout=${timeout.inSeconds}s');
     }
     if (context != null) {
       await _runMoveNetAnalysis(
@@ -45,7 +46,8 @@ class VideoAnalysisService {
     final frames = framesJson.map(FrameData.fromJson).toList();
 
     if (kDebugMode) {
-      debugPrint('ANALYSIS_DONE analyzeVideo frames=${frames.length} path=$videoPath');
+      debugPrint(
+          'ANALYSIS_DONE analyzeVideo frames=${frames.length} path=$videoPath');
     }
 
     return UserSwing(
@@ -74,7 +76,8 @@ class VideoAnalysisService {
     final startedAt = DateTime.now();
     try {
       if (kDebugMode) {
-        debugPrint('ANALYSIS_START runMoveNet path=$videoPath showDialog=$showProgressDialog');
+        debugPrint(
+            'ANALYSIS_START runMoveNet path=$videoPath showDialog=$showProgressDialog');
       }
       rootNavigator = Navigator.of(context, rootNavigator: true);
       final overlay = Overlay.maybeOf(context);
@@ -183,17 +186,17 @@ class VideoAnalysisService {
         if (result != null && result['keypoints'] != null) {
           final keypoints = result['keypoints'] as Map<String, dynamic>;
           final bodyPresent = PoseValidator.isBodyPresent(keypoints);
-          final frameValid =
-              bodyPresent && PoseValidator.isKeypointsValid(keypoints);
+          final frameValid = PoseValidator.isKeypointsValid(keypoints);
           final quality = PoseValidator.calculatePoseQuality(keypoints);
 
-          if (frameValid) {
+          if (bodyPresent) {
             poseData.add({
               'timestamp_ms': currentFrameMs,
               'frame_index': analyzedFrameIndex,
               'fps_used': fpsUsed,
               'keypoints': keypoints,
               'quality_score': quality,
+              'body_present': bodyPresent,
               'frame_valid': frameValid,
             });
           }
@@ -231,7 +234,8 @@ class VideoAnalysisService {
       }));
 
       if (kDebugMode) {
-        debugPrint('ANALYSIS_SAVED runMoveNet frames=${poseData.length} json=$jsonPath');
+        debugPrint(
+            'ANALYSIS_SAVED runMoveNet frames=${poseData.length} json=$jsonPath');
       }
     } finally {
       overlayEntry?.remove();

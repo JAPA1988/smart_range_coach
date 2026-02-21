@@ -125,6 +125,64 @@ String issueTitle(Issue i) {
   }
 }
 
+enum KeyPosition {
+  address,
+  takeaway,
+  setPosition,
+  topPosition,
+  downswing,
+  impact,
+  followThrough,
+}
+
+String keyPositionTitle(KeyPosition p) {
+  switch (p) {
+    case KeyPosition.address:
+      return 'Address';
+    case KeyPosition.takeaway:
+      return 'Takeaway';
+    case KeyPosition.setPosition:
+      return 'Set-Position';
+    case KeyPosition.topPosition:
+      return 'Top Position';
+    case KeyPosition.downswing:
+      return 'Downswing';
+    case KeyPosition.impact:
+      return 'Impact';
+    case KeyPosition.followThrough:
+      return 'Follow Through';
+  }
+}
+
+String keyPositionSlug(KeyPosition p) {
+  switch (p) {
+    case KeyPosition.address:
+      return 'address';
+    case KeyPosition.takeaway:
+      return 'takeaway';
+    case KeyPosition.setPosition:
+      return 'set_position';
+    case KeyPosition.topPosition:
+      return 'top_position';
+    case KeyPosition.downswing:
+      return 'downswing';
+    case KeyPosition.impact:
+      return 'impact';
+    case KeyPosition.followThrough:
+      return 'follow_through';
+  }
+}
+
+class KeyPositionSelection {
+  final PoseFrame poseFrame;
+  final Duration videoPosition;
+
+  KeyPositionSelection({
+    required this.poseFrame,
+    required this.videoPosition,
+  });
+}
+
 // Simple detected line model (normalized coordinates 0..1)
 // p1/p2 are relative to image width/height (0..1)
 // label e.g. 'shoulder', 'spine', 'shaft'
@@ -756,8 +814,13 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   bool _videoReady = false;
   String? _videoError;
   final Set<Issue> _selected = {};
+  final Map<KeyPosition, KeyPositionSelection> _markedKeyPositions = {};
+  bool _savingKeyPositions = false;
   VoidCallback? _ctrlListener;
   final GlobalKey _videoRepaintKey = GlobalKey();
+
+  bool get _allKeyPositionsMarked =>
+      _markedKeyPositions.length == KeyPosition.values.length;
 
   // Detected overlay lines (in image coordinates)
   List<DetectedLine> _detectedLines = [];
@@ -1142,8 +1205,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   void _updatePoseFromVideo() {
     void applyPoseFrame(PoseFrame? frame) {
       setState(() {
-        final hasRenderablePose =
-            frame != null && frame.isBodyPresent && frame.isValid;
+        final hasRenderablePose = frame != null && frame.isBodyPresent;
 
         if (hasRenderablePose) {
           _consecutiveNoBodyFrames = 0;
@@ -1282,6 +1344,194 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     final smoothedNearest =
         stableNearest != null ? _smoothPoseFrame(stableNearest) : null;
     applyPoseFrame(smoothedNearest);
+  }
+
+  bool _canMarkKeyPosition() {
+    final ctrl = _controller;
+    if (ctrl == null || !ctrl.value.isInitialized) return false;
+    if (ctrl.value.isPlaying) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('Bitte erst pausieren, um eine Position zu markieren.')),
+      );
+      return false;
+    }
+    if (_currentPoseFrame == null || !_currentPoseFrame!.isBodyPresent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Kein Körper erkannt – Position kann nicht gespeichert werden.'),
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  void _toggleKeyPosition(KeyPosition position, bool enabled) {
+    if (enabled) {
+      if (!_canMarkKeyPosition()) return;
+      final ctrl = _controller!;
+      _markedKeyPositions[position] = KeyPositionSelection(
+        poseFrame: _currentPoseFrame!,
+        videoPosition: ctrl.value.position,
+      );
+    } else {
+      _markedKeyPositions.remove(position);
+    }
+    setState(() {});
+  }
+
+  Future<ui.Image> _captureRepaintBoundary(
+      GlobalKey key, double pixelRatio) async {
+    final boundary =
+        key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) {
+      throw Exception('Capture failed: boundary not ready');
+    }
+    return boundary.toImage(pixelRatio: pixelRatio);
+  }
+
+  Future<ui.Image> _renderRasterImage(
+    PoseFrame poseFrame,
+    Size logicalSize,
+    double pixelRatio,
+  ) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.scale(pixelRatio);
+
+    final rect = Rect.fromLTWH(0, 0, logicalSize.width, logicalSize.height);
+    final bgPaint = Paint()..color = Colors.black;
+    canvas.drawRect(rect, bgPaint);
+
+    _ReviewGridPainter().paint(canvas, logicalSize);
+    PoseOverlayPainter(poseFrame).paint(canvas, logicalSize);
+
+    final picture = recorder.endRecording();
+    return picture.toImage(
+      (logicalSize.width * pixelRatio).round(),
+      (logicalSize.height * pixelRatio).round(),
+    );
+  }
+
+  Future<void> _saveKeyPositions() async {
+    if (!_allKeyPositionsMarked || _savingKeyPositions) return;
+
+    final ctrl = _controller;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+
+    setState(() => _savingKeyPositions = true);
+
+    final wasPlaying = ctrl.value.isPlaying;
+    final originalPos = ctrl.value.position;
+    await ctrl.pause();
+
+    try {
+      final boundary = _videoRepaintKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) {
+        throw Exception('Video boundary not ready');
+      }
+
+      final logicalSize = boundary.size;
+      final pixelRatio = View.of(context).devicePixelRatio;
+
+      final dir = await getApplicationDocumentsDirectory();
+      final outDir = Directory(
+          '${dir.path}${Platform.pathSeparator}smart_range_coach${Platform.pathSeparator}key_positions');
+      if (!await outDir.exists()) {
+        await outDir.create(recursive: true);
+      }
+
+      final swingId =
+          widget.videoPath.split(Platform.pathSeparator).last.replaceAll(
+                '.mp4',
+                '',
+              );
+
+      for (final entry in _markedKeyPositions.entries) {
+        final position = entry.key;
+        final selection = entry.value;
+
+        await ctrl.seekTo(selection.videoPosition);
+        await Future.delayed(const Duration(milliseconds: 120));
+
+        final image =
+            await _captureRepaintBoundary(_videoRepaintKey, pixelRatio);
+        final raster = await _renderRasterImage(
+          selection.poseFrame,
+          logicalSize,
+          pixelRatio,
+        );
+
+        final imagePath =
+            '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.png';
+        final rasterPath =
+            '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}_raster.png';
+        final jsonPath =
+            '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.json';
+
+        final imageBytes =
+            await image.toByteData(format: ui.ImageByteFormat.png);
+        final rasterBytes =
+            await raster.toByteData(format: ui.ImageByteFormat.png);
+        image.dispose();
+        raster.dispose();
+
+        if (imageBytes != null) {
+          await File(imagePath).writeAsBytes(imageBytes.buffer.asUint8List());
+        }
+        if (rasterBytes != null) {
+          await File(rasterPath).writeAsBytes(rasterBytes.buffer.asUint8List());
+        }
+
+        final keypointsJson = selection.poseFrame.keypoints.map((key, kp) {
+          return MapEntry(key, {
+            'x': kp.x,
+            'y': kp.y,
+            'score': kp.confidence,
+          });
+        });
+
+        final doc = {
+          'position': keyPositionSlug(position),
+          'timestamp_ms': selection.poseFrame.timestamp.inMilliseconds,
+          'video_position_ms': selection.videoPosition.inMilliseconds,
+          'frame_index': selection.poseFrame.frameIndex,
+          'quality_score': selection.poseFrame.qualityScore,
+          'image_path': imagePath,
+          'raster_path': rasterPath,
+          'keypoints': keypointsJson,
+        };
+
+        await File(jsonPath).writeAsString(jsonEncode(doc));
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Key Positions gespeichert ✅')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Speichern fehlgeschlagen: $e')),
+        );
+      }
+    } finally {
+      try {
+        await ctrl.seekTo(originalPos);
+        if (wasPlaying) {
+          await ctrl.play();
+        }
+      } catch (_) {}
+
+      if (mounted) {
+        setState(() => _savingKeyPositions = false);
+      }
+    }
   }
 
   PoseFrame _smoothPoseFrame(PoseFrame frame) {
@@ -3004,6 +3254,57 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                       ListTileControlAffinity.leading,
                                 );
                               }).toList(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Card(
+                          color: Colors.blueGrey.shade900,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('🏷️ Key Positions',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16)),
+                                const SizedBox(height: 8),
+                                ...KeyPosition.values.map((pos) {
+                                  final selected =
+                                      _markedKeyPositions.containsKey(pos);
+                                  final selection = _markedKeyPositions[pos];
+                                  return CheckboxListTile(
+                                    value: selected,
+                                    onChanged: _savingKeyPositions
+                                        ? null
+                                        : (v) =>
+                                            _toggleKeyPosition(pos, v == true),
+                                    title: Text(keyPositionTitle(pos)),
+                                    subtitle: selection == null
+                                        ? null
+                                        : Text(
+                                            'Gespeichert @ ${selection.videoPosition.inMilliseconds}ms'),
+                                    dense: true,
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                  );
+                                }),
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: ElevatedButton.icon(
+                                    onPressed: _allKeyPositionsMarked &&
+                                            !_savingKeyPositions
+                                        ? _saveKeyPositions
+                                        : null,
+                                    icon: const Icon(Icons.save),
+                                    label: _savingKeyPositions
+                                        ? const Text('Speichere...')
+                                        : const Text('Alles speichern'),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
