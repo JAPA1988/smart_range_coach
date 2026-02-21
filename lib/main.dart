@@ -867,6 +867,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   final double _analysisCapturePixelRatio = 1.25;
   static const int _maxPoseGapMs = 250;
   final int _poseConfirmFrames = 3;
+  final int _poseLossConfirmFrames = 4;
   int _consecutiveValidPoseFrames = 0;
   int _consecutiveNoBodyFrames = 0;
 
@@ -1217,12 +1218,15 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         } else {
           _consecutiveValidPoseFrames = 0;
           _consecutiveNoBodyFrames++;
-          _currentPoseFrame = null;
-          _allKeypoints = null;
-          _lastKeypoints = null;
-          _smoothedPoseKeypoints.clear();
-          _lastStableArmKeypoints.clear();
-          _lastStableArmTimestamps.clear();
+
+          if (_consecutiveNoBodyFrames >= _poseLossConfirmFrames) {
+            _currentPoseFrame = null;
+            _allKeypoints = null;
+            _lastKeypoints = null;
+            _smoothedPoseKeypoints.clear();
+            _lastStableArmKeypoints.clear();
+            _lastStableArmTimestamps.clear();
+          }
         }
       });
     }
