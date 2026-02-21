@@ -1378,14 +1378,54 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     if (enabled) {
       if (!_canMarkKeyPosition()) return;
       final ctrl = _controller!;
+      final timestamp = ctrl.value.position;
+      final currentFrame = _currentPoseFrame!;
+      final copiedKeypoints = <String, Keypoint>{};
+      for (final entry in currentFrame.keypoints.entries) {
+        final kp = entry.value;
+        copiedKeypoints[entry.key] = Keypoint(
+          label: kp.label,
+          x: kp.x,
+          y: kp.y,
+          confidence: kp.confidence,
+        );
+      }
+      final snapshot = PoseFrame(
+        timestamp: timestamp,
+        frameIndex: currentFrame.frameIndex,
+        keypoints: copiedKeypoints,
+        qualityScore: currentFrame.qualityScore,
+      );
+
       _markedKeyPositions[position] = KeyPositionSelection(
-        poseFrame: _currentPoseFrame!,
-        videoPosition: ctrl.value.position,
+        poseFrame: snapshot,
+        videoPosition: timestamp,
       );
     } else {
       _markedKeyPositions.remove(position);
     }
     setState(() {});
+  }
+
+  Future<void> _seekForCapture(
+      VideoPlayerController ctrl, Duration target) async {
+    await ctrl.pause();
+    await ctrl.seekTo(target);
+
+    for (int i = 0; i < 6; i++) {
+      await Future.delayed(const Duration(milliseconds: 16));
+      final diff = (ctrl.value.position - target).inMilliseconds.abs();
+      if (diff <= 20) {
+        await Future.delayed(const Duration(milliseconds: 40));
+        return;
+      }
+    }
+
+    await ctrl.play();
+    await Future.delayed(const Duration(milliseconds: 30));
+    await ctrl.pause();
+    await ctrl.seekTo(target);
+    await Future.delayed(const Duration(milliseconds: 40));
   }
 
   Future<ui.Image> _captureRepaintBoundary(
@@ -1436,6 +1476,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     bool openViewer = false;
     String? viewerDir;
     String? viewerSwingId;
+    VideoPlayerController? captureController;
+    OverlayEntry? captureOverlay;
+    final captureRepaintKey = GlobalKey();
 
     try {
       final boundary = _videoRepaintKey.currentContext?.findRenderObject()
@@ -1446,6 +1489,27 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
       final logicalSize = boundary.size;
       final pixelRatio = View.of(context).devicePixelRatio;
+
+      captureController = VideoPlayerController.file(File(widget.videoPath));
+      await captureController.initialize();
+      await captureController.pause();
+
+      captureOverlay = OverlayEntry(
+        builder: (_) => Positioned(
+          left: -10000,
+          top: -10000,
+          child: RepaintBoundary(
+            key: captureRepaintKey,
+            child: SizedBox(
+              width: logicalSize.width,
+              height: logicalSize.height,
+              child: VideoPlayer(captureController!),
+            ),
+          ),
+        ),
+      );
+      Overlay.of(context, rootOverlay: true).insert(captureOverlay);
+      await Future.delayed(const Duration(milliseconds: 120));
 
       final dir = await getApplicationDocumentsDirectory();
       final outDir = Directory(
@@ -1464,11 +1528,11 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final position = entry.key;
         final selection = entry.value;
 
-        await ctrl.seekTo(selection.videoPosition);
-        await Future.delayed(const Duration(milliseconds: 120));
+        final target = selection.videoPosition;
+        await _seekForCapture(captureController, target);
 
         final image =
-            await _captureRepaintBoundary(_videoRepaintKey, pixelRatio);
+            await _captureRepaintBoundary(captureRepaintKey, pixelRatio);
         final raster = await _renderRasterImage(
           selection.poseFrame,
           logicalSize,
@@ -1534,6 +1598,13 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         );
       }
     } finally {
+      try {
+        captureOverlay?.remove();
+      } catch (_) {}
+      try {
+        await captureController?.dispose();
+      } catch (_) {}
+
       try {
         await ctrl.seekTo(originalPos);
         if (wasPlaying) {
