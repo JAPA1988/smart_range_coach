@@ -22,6 +22,8 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.io.File
 
 class NativeCameraActivity : AppCompatActivity() {
@@ -49,6 +51,7 @@ class NativeCameraActivity : AppCompatActivity() {
 
         previewView = findViewById(R.id.previewView)
         recordButton = findViewById(R.id.recordButton)
+        applyBottomInsetsToRecordButton()
 
         recordButton.setOnClickListener {
             if (!isRecording) {
@@ -65,6 +68,22 @@ class NativeCameraActivity : AppCompatActivity() {
         } else {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun applyBottomInsetsToRecordButton() {
+        val baseMarginDp = 24
+        ViewCompat.setOnApplyWindowInsetsListener(recordButton) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val params = view.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            params.bottomMargin = systemBars.bottom + dpToPx(baseMarginDp)
+            view.layoutParams = params
+            insets
+        }
+        ViewCompat.requestApplyInsets(recordButton)
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
 
     private fun startCamera() {

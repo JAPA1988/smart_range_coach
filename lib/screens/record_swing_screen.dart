@@ -20,23 +20,49 @@ class RecordSwingScreen extends StatefulWidget {
 class _RecordSwingScreenState extends State<RecordSwingScreen> {
   static const _channel = MethodChannel('com.smart_range_coach/native_camera');
 
+  bool _isLaunchingCamera = true;
   bool _isAnalyzing = false;
   String? _error;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startNativeRecording();
+    });
+  }
+
   Future<void> _startNativeRecording() async {
-    setState(() => _error = null);
-
-    final String? videoPath =
-        await _channel.invokeMethod<String>('startNativeCamera');
-
-    if (!mounted) return;
-
-    if (videoPath == null) {
-      setState(() => _error = 'Recording canceled.');
-      return;
+    if (mounted) {
+      setState(() {
+        _error = null;
+        _isLaunchingCamera = true;
+      });
     }
 
-    await _analyzeVideo(videoPath);
+    try {
+      final String? videoPath =
+          await _channel.invokeMethod<String>('startNativeCamera');
+
+      if (!mounted) return;
+
+      if (videoPath == null) {
+        setState(() {
+          _isLaunchingCamera = false;
+          _error = 'Recording canceled.';
+        });
+        return;
+      }
+
+      setState(() => _isLaunchingCamera = false);
+      await _analyzeVideo(videoPath);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLaunchingCamera = false;
+        _error = 'Could not open native camera: $e';
+      });
+    }
   }
 
   Future<void> _analyzeVideo(String videoPath) async {
@@ -111,12 +137,11 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Record Swing')),
       body: Center(
-        child: _isAnalyzing
-            ? const Text('ANALYZING... Bitte warten')
-            : ElevatedButton(
-                onPressed: _startNativeRecording,
-                child: const Text('Start Native Recording'),
-              ),
+        child: _isLaunchingCamera
+            ? const Text('Öffne Kamera...')
+            : _isAnalyzing
+                ? const Text('ANALYZING... Bitte warten')
+                : const Text('Warte auf Aufnahme...'),
       ),
     );
   }

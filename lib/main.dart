@@ -802,6 +802,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   final int _elbowHoldMs = 180;
   final int _wristHoldMs = 240;
   final double _analysisCapturePixelRatio = 1.25;
+  static const int _maxPoseGapMs = 250;
   final int _poseConfirmFrames = 3;
   int _consecutiveValidPoseFrames = 0;
   int _consecutiveNoBodyFrames = 0;
@@ -1179,11 +1180,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     }
 
     // Edge case: Nach letztem Frame
-    if (currentMs > _poseFrames!.last.timestamp.inMilliseconds + 500) {
-      final lastFrame = _stabilizeArmKeypoints(
-          _poseFrames!.last, _poseFrames!.last.timestamp);
-      final smoothedFrame = _smoothPoseFrame(lastFrame);
-      applyPoseFrame(smoothedFrame);
+    if (currentMs > _poseFrames!.last.timestamp.inMilliseconds) {
+      applyPoseFrame(null);
       return;
     }
 
@@ -1214,6 +1212,14 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
     // Interpoliere zwischen Frames
     if (before != null && after != null) {
+      final gapMs =
+          (after.timestamp.inMilliseconds - before.timestamp.inMilliseconds)
+              .abs();
+      if (gapMs > _maxPoseGapMs) {
+        applyPoseFrame(null);
+        return;
+      }
+
       final totalDuration =
           (after.timestamp.inMicroseconds - before.timestamp.inMicroseconds)
               .toDouble();
