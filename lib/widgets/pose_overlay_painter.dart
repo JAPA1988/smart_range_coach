@@ -33,7 +33,9 @@ class PoseOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // Early return wenn kein Frame
-    if (poseFrame == null || !poseFrame!.isBodyPresent) return;
+    if (poseFrame == null || !poseFrame!.isBodyPresent || !poseFrame!.isValid) {
+      return;
+    }
 
     // Farbzuordnung für verschiedene Körperteile
     final keypointColors = {

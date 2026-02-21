@@ -106,15 +106,40 @@ class PoseValidator {
 
   /// Prüft ob Körper im Bild ist (nicht nur Artefakte)
   static bool isBodyPresent(Map<String, dynamic> keypoints) {
-    // Körper muss Schultern UND Hüften haben
-    final hasShoulders = isKeypointVisible(keypoints['left_shoulder']) &&
-        isKeypointVisible(keypoints['right_shoulder']);
+    final leftShoulder = keypoints['left_shoulder'] as Map<String, dynamic>?;
+    final rightShoulder = keypoints['right_shoulder'] as Map<String, dynamic>?;
+    final leftHip = keypoints['left_hip'] as Map<String, dynamic>?;
+    final rightHip = keypoints['right_hip'] as Map<String, dynamic>?;
 
-    final hasHips = keypoints.containsKey('left_hip') &&
-        keypoints.containsKey('right_hip') &&
-        (isKeypointVisible(keypoints['left_hip']) ||
-            isKeypointVisible(keypoints['right_hip']));
+    final hasShoulders =
+        isKeypointVisible(leftShoulder) && isKeypointVisible(rightShoulder);
+    final hasHip = isKeypointVisible(leftHip) || isKeypointVisible(rightHip);
+    if (!hasShoulders || !hasHip) return false;
 
-    return hasShoulders && hasHips;
+    final leftShoulderX = (leftShoulder?['x'] as num?)?.toDouble();
+    final rightShoulderX = (rightShoulder?['x'] as num?)?.toDouble();
+    final leftShoulderY = (leftShoulder?['y'] as num?)?.toDouble();
+    final rightShoulderY = (rightShoulder?['y'] as num?)?.toDouble();
+    final leftHipY = (leftHip?['y'] as num?)?.toDouble();
+    final rightHipY = (rightHip?['y'] as num?)?.toDouble();
+
+    if (leftShoulderX == null ||
+        rightShoulderX == null ||
+        leftShoulderY == null ||
+        rightShoulderY == null ||
+        leftHipY == null ||
+        rightHipY == null) {
+      return false;
+    }
+
+    final shoulderSpan = (leftShoulderX - rightShoulderX).abs();
+    if (shoulderSpan < 0.04 || shoulderSpan > 0.85) return false;
+
+    final shoulderCenterY = (leftShoulderY + rightShoulderY) / 2.0;
+    final hipCenterY = (leftHipY + rightHipY) / 2.0;
+    final torsoHeight = hipCenterY - shoulderCenterY;
+    if (torsoHeight < 0.03 || torsoHeight > 0.7) return false;
+
+    return true;
   }
 }

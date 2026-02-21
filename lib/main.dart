@@ -802,6 +802,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   final int _elbowHoldMs = 180;
   final int _wristHoldMs = 240;
   final double _analysisCapturePixelRatio = 1.25;
+  final int _poseConfirmFrames = 3;
+  int _consecutiveValidPoseFrames = 0;
+  int _consecutiveNoBodyFrames = 0;
 
   // Latency Compensator für Predictive Leading
   final _latencyCompensator = LatencyCompensator();
@@ -1090,26 +1093,73 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
   bool _movenetBodyPresent(List<Map<String, double>> kps) {
     if (kps.length < 13) return false;
-    final leftShoulder = kps[5]['score'] ?? 0.0;
-    final rightShoulder = kps[6]['score'] ?? 0.0;
-    final leftHip = kps[11]['score'] ?? 0.0;
-    final rightHip = kps[12]['score'] ?? 0.0;
+    const bodyPresenceThreshold = 0.35;
 
-    return leftShoulder >= _minKeypointScore &&
-        rightShoulder >= _minKeypointScore &&
-        (leftHip >= _minKeypointScore || rightHip >= _minKeypointScore);
+    final ls = kps[5];
+    final rs = kps[6];
+    final lh = kps[11];
+    final rh = kps[12];
+
+    final leftShoulderScore = ls['score'] ?? 0.0;
+    final rightShoulderScore = rs['score'] ?? 0.0;
+    final leftHipScore = lh['score'] ?? 0.0;
+    final rightHipScore = rh['score'] ?? 0.0;
+
+    final hasShoulders = leftShoulderScore >= bodyPresenceThreshold &&
+        rightShoulderScore >= bodyPresenceThreshold;
+    final hasHip = leftHipScore >= bodyPresenceThreshold ||
+        rightHipScore >= bodyPresenceThreshold;
+    if (!hasShoulders || !hasHip) return false;
+
+    final leftShoulderX = ls['x'];
+    final rightShoulderX = rs['x'];
+    final leftShoulderY = ls['y'];
+    final rightShoulderY = rs['y'];
+    final leftHipY = lh['y'];
+    final rightHipY = rh['y'];
+
+    if (leftShoulderX == null ||
+        rightShoulderX == null ||
+        leftShoulderY == null ||
+        rightShoulderY == null ||
+        leftHipY == null ||
+        rightHipY == null) {
+      return false;
+    }
+
+    final shoulderSpan = (leftShoulderX - rightShoulderX).abs();
+    if (shoulderSpan < 0.04 || shoulderSpan > 0.85) return false;
+
+    final shoulderCenterY = (leftShoulderY + rightShoulderY) / 2.0;
+    final hipCenterY = (leftHipY + rightHipY) / 2.0;
+    final torsoHeight = hipCenterY - shoulderCenterY;
+    if (torsoHeight < 0.03 || torsoHeight > 0.7) return false;
+
+    return true;
   }
 
   void _updatePoseFromVideo() {
     void applyPoseFrame(PoseFrame? frame) {
       setState(() {
-        if (frame != null && frame.isBodyPresent) {
-          _currentPoseFrame = frame;
+        final hasRenderablePose =
+            frame != null && frame.isBodyPresent && frame.isValid;
+
+        if (hasRenderablePose) {
+          _consecutiveNoBodyFrames = 0;
+          _consecutiveValidPoseFrames++;
+
+          if (_consecutiveValidPoseFrames >= _poseConfirmFrames) {
+            _currentPoseFrame = frame;
+          }
         } else {
+          _consecutiveValidPoseFrames = 0;
+          _consecutiveNoBodyFrames++;
           _currentPoseFrame = null;
           _allKeypoints = null;
           _lastKeypoints = null;
           _smoothedPoseKeypoints.clear();
+          _lastStableArmKeypoints.clear();
+          _lastStableArmTimestamps.clear();
         }
       });
     }
@@ -1124,10 +1174,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
     // Edge case: Vor erstem Frame
     if (currentMs < _poseFrames!.first.timestamp.inMilliseconds) {
-      final firstFrame =
-          _stabilizeArmKeypoints(_poseFrames!.first, currentTime);
-      final smoothedFrame = _smoothPoseFrame(firstFrame);
-      applyPoseFrame(smoothedFrame);
+      applyPoseFrame(null);
       return;
     }
 
@@ -2564,6 +2611,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                               ),
                             // Keypoints overlay (if available - Fallback für alte Daten)
                             if (!_analysisRunning &&
+                                (_poseFrames == null || _poseFrames!.isEmpty) &&
                                 _lastKeypoints != null &&
                                 _movenetBodyPresent(_lastKeypoints!) &&
                                 _currentPoseFrame == null)
