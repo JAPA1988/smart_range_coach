@@ -280,11 +280,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           Positioned.fill(
                             child: CustomPaint(painter: _ComparisonGridPainter()),
                           ),
-                          Image.asset(
-                            _selectedProSwing!
-                                .imagePathForPosition(_selectedPosition),
-                            fit: BoxFit.contain,
-                          ),
                           Positioned.fill(
                             child: CustomPaint(
                               painter: PoseOverlayPainter(proPose),
@@ -394,20 +389,33 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
     double? minX, minY, maxX, maxY;
 
+    void include(double x, double y) {
+      minX = minX == null ? x : math.min(minX!, x);
+      minY = minY == null ? y : math.min(minY!, y);
+      maxX = maxX == null ? x : math.max(maxX!, x);
+      maxY = maxY == null ? y : math.max(maxY!, y);
+    }
+
     for (final name in names) {
       final kp = frame.getKeypoint(name);
       if (kp == null || !kp.isVisible) continue;
-      minX = minX == null ? kp.x : math.min(minX, kp.x);
-      minY = minY == null ? kp.y : math.min(minY, kp.y);
-      maxX = maxX == null ? kp.x : math.max(maxX, kp.x);
-      maxY = maxY == null ? kp.y : math.max(maxY, kp.y);
+      include(kp.x, kp.y);
+    }
+
+    // Address-Fallback: verwende vorhandene Punkte auch bei niedriger Confidence.
+    if (minX == null || minY == null || maxX == null || maxY == null) {
+      for (final name in names) {
+        final kp = frame.getKeypoint(name);
+        if (kp == null) continue;
+        include(kp.x, kp.y);
+      }
     }
 
     if (minX == null || minY == null || maxX == null || maxY == null) {
       return const Rect.fromLTWH(0.0, 0.0, 1.0, 1.0);
     }
 
-    return Rect.fromLTRB(minX, minY, maxX, maxY);
+    return Rect.fromLTRB(minX!, minY!, maxX!, maxY!);
   }
 
   double _poseScaleFactor(pose.PoseFrame source, pose.PoseFrame target) {

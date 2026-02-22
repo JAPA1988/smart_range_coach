@@ -95,8 +95,10 @@ class PoseOverlayPainter extends CustomPainter {
           ..color = color
           ..style = PaintingStyle.fill;
 
+        final center = Offset(kp.x * size.width, kp.y * size.height);
+
         canvas.drawCircle(
-          Offset(kp.x * size.width, kp.y * size.height),
+          center,
           6,
           pointPaint,
         );
@@ -108,10 +110,36 @@ class PoseOverlayPainter extends CustomPainter {
           ..strokeWidth = 2;
 
         canvas.drawCircle(
-          Offset(kp.x * size.width, kp.y * size.height),
+          center,
           8,
           confidencePaint,
         );
+
+        final suffix = kp.label.startsWith('left_')
+            ? 'l'
+            : kp.label.startsWith('right_')
+                ? 'r'
+                : null;
+
+        if (suffix != null) {
+          final textPainter = TextPainter(
+            text: TextSpan(
+              text: suffix,
+              style: const TextStyle(
+                color: Colors.black,
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          );
+
+          textPainter.layout();
+          textPainter.paint(
+            canvas,
+            center - Offset(textPainter.width / 2, textPainter.height / 2),
+          );
+        }
       }
     }
 
