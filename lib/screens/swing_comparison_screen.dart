@@ -277,6 +277,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       alignment: Alignment.center,
                       child: Stack(
                         children: [
+                          Positioned.fill(
+                            child: CustomPaint(painter: _ComparisonGridPainter()),
+                          ),
                           Image.asset(
                             _selectedProSwing!
                                 .imagePathForPosition(_selectedPosition),
@@ -385,16 +388,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     const names = [
       'left_shoulder',
       'right_shoulder',
-      'left_elbow',
-      'right_elbow',
-      'left_wrist',
-      'right_wrist',
       'left_hip',
       'right_hip',
-      'left_knee',
-      'right_knee',
-      'left_ankle',
-      'right_ankle',
     ];
 
     double? minX, minY, maxX, maxY;
