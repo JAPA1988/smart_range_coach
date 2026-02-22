@@ -1,4 +1,8 @@
 class ReferenceSwing {
+  static const Map<String, String> _imageNameMap = {
+    'address': 'adress',
+  };
+
   final String swingId;
   final String golferName;
   final String clubType;
@@ -42,8 +46,10 @@ class ReferenceSwing {
 
   String get assetBasePath => 'assets/reference_swings/$swingId';
   String get videoPath => '$assetBasePath/video.mp4';
-  String imagePathForPosition(String position) =>
-      '$assetBasePath/images/$position.jpg';
+  String imagePathForPosition(String position) {
+    final mapped = _imageNameMap[position] ?? position;
+    return '$assetBasePath/images/$mapped.jpg';
+  }
 }
 
 class VideoInfo {

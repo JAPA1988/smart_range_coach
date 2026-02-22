@@ -204,10 +204,27 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
           _buildPositionSelector(),
           _buildDataScreenButton(),
           Expanded(child: _buildSideBySideComparison()),
-          Flexible(
-            child: _buildMetricsTable(),
-          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildRasterFrame({
+    required double width,
+    required double height,
+    required Widget child,
+  }) {
+    return AspectRatio(
+      aspectRatio: width / height,
+      child: Center(
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: child,
+          ),
+        ),
       ),
     );
   }
@@ -295,29 +312,28 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               Expanded(
                 child: Container(
                   color: Colors.black,
-                  child: Center(
+                  child: _buildRasterFrame(
+                    width: proVideo.width.toDouble(),
+                    height: proVideo.height.toDouble(),
                     child: userPosition.skeletonImagePath != null
                         ? Image.file(
                             File(userPosition.skeletonImagePath!),
                             fit: BoxFit.contain,
                           )
-                        : AspectRatio(
-                            aspectRatio: proVideo.width / proVideo.height,
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                      painter: _ComparisonGridPainter()),
-                                ),
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: PoseOverlayPainter(
-                                      _userToPoseFrame(userPosition),
-                                    ),
+                        : Stack(
+                            children: [
+                              Positioned.fill(
+                                child: CustomPaint(
+                                    painter: _ComparisonGridPainter()),
+                              ),
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: PoseOverlayPainter(
+                                    _userToPoseFrame(userPosition),
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                   ),
                 ),
@@ -344,28 +360,27 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               Expanded(
                 child: Container(
                   color: Colors.black,
-                  child: Center(
+                  child: _buildRasterFrame(
+                    width: proVideo.width.toDouble(),
+                    height: proVideo.height.toDouble(),
                     child: Image.asset(
                       _selectedProSwing!.imagePathForPosition(_selectedPosition),
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) {
-                        return AspectRatio(
-                          aspectRatio: proVideo.width / proVideo.height,
-                          child: Stack(
-                            children: [
-                              Positioned.fill(
-                                child: CustomPaint(
-                                    painter: _ComparisonGridPainter()),
-                              ),
-                              Positioned.fill(
-                                child: CustomPaint(
-                                  painter: PoseOverlayPainter(
-                                    _proToPoseFrame(proPosition),
-                                  ),
+                        return Stack(
+                          children: [
+                            Positioned.fill(
+                              child: CustomPaint(
+                                  painter: _ComparisonGridPainter()),
+                            ),
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: PoseOverlayPainter(
+                                  _proToPoseFrame(proPosition),
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         );
                       },
                     ),
