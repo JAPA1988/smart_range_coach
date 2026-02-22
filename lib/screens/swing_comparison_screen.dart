@@ -216,15 +216,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   }) {
     return AspectRatio(
       aspectRatio: width / height,
-      child: Center(
-        child: FittedBox(
-          fit: BoxFit.contain,
-          child: SizedBox(
-            width: width,
-            height: height,
-            child: child,
-          ),
-        ),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: child,
       ),
     );
   }
@@ -493,90 +488,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
           userKeypoints: userPosition.keypoints,
           proKeypoints: proPosition.keypoints,
         ),
-      ),
-    );
-  }
-
-  Widget _buildMetricsTable() {
-    final userPosition = _effectiveUserPositions()[_selectedPosition];
-    final proAnalysis = _selectedProSwing!.analysis[_selectedPosition];
-
-    if (userPosition == null || proAnalysis == null) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 180),
-      color: Colors.grey[100],
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Metrics Comparison',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            _buildMetricRow('Spine Angle', null, proAnalysis.spineAngle),
-            _buildMetricRow('X-Factor', null, proAnalysis.xFactor),
-            _buildMetricRow(
-                'Shoulder Rotation', null, proAnalysis.shoulderRotation),
-            _buildMetricRow('Hip Rotation', null, proAnalysis.hipRotation),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMetricRow(String label, double? userValue, double proValue) {
-    final hasUser = userValue != null;
-    final diff = hasUser ? (userValue! - proValue).abs() : null;
-    final isGood = diff != null && diff < 10;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Text(label),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              hasUser ? '${userValue!.toStringAsFixed(1)}°' : '--',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              '${proValue.toStringAsFixed(1)}°',
-              style: const TextStyle(color: Colors.blue),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Row(
-              children: [
-                Icon(
-                  isGood ? Icons.check_circle : Icons.warning,
-                  color: isGood ? Colors.green : Colors.orange,
-                  size: 16,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  diff != null ? '${diff.toStringAsFixed(1)}°' : '--',
-                  style: TextStyle(
-                    color: isGood ? Colors.green : Colors.orange,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

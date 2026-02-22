@@ -1,6 +1,12 @@
 class ReferenceSwing {
   static const Map<String, String> _imageNameMap = {
     'address': 'adress',
+    'takeaway': 'takeaway',
+    'set_position': 'set_position',
+    'top_position': 'top_position',
+    'downswing': 'downswing',
+    'impact': 'impact',
+    'follow_through': 'follow_through',
   };
 
   final String swingId;
