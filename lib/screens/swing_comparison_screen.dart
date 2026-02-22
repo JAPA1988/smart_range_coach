@@ -389,40 +389,53 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     );
   }
 
-  double _poseScaleFactor(pose.PoseFrame source, pose.PoseFrame target) {
-    Rect bounds(pose.PoseFrame frame) {
-      const names = [
-        'left_shoulder',
-        'right_shoulder',
-        'left_hip',
-        'right_hip',
-        'left_knee',
-        'right_knee',
-        'left_ankle',
-        'right_ankle',
-      ];
+  Rect _poseBounds(pose.PoseFrame frame) {
+    const names = [
+      'left_shoulder',
+      'right_shoulder',
+      'left_elbow',
+      'right_elbow',
+      'left_wrist',
+      'right_wrist',
+      'left_hip',
+      'right_hip',
+      'left_knee',
+      'right_knee',
+      'left_ankle',
+      'right_ankle',
+    ];
 
-      double? minX, minY, maxX, maxY;
-      for (final n in names) {
-        final kp = frame.getKeypoint(n);
-        if (kp == null || !kp.isVisible) continue;
-        minX = minX == null ? kp.x : math.min(minX, kp.x);
-        minY = minY == null ? kp.y : math.min(minY, kp.y);
-        maxX = maxX == null ? kp.x : math.max(maxX, kp.x);
-        maxY = maxY == null ? kp.y : math.max(maxY, kp.y);
-      }
+    double? minX, minY, maxX, maxY;
 
-      return (minX == null || minY == null || maxX == null || maxY == null)
-          ? const Rect.fromLTWH(0, 0, 1, 1)
-          : Rect.fromLTRB(minX, minY, maxX, maxY);
+    for (final name in names) {
+      final kp = frame.getKeypoint(name);
+      if (kp == null || !kp.isVisible) continue;
+      minX = minX == null ? kp.x : math.min(minX, kp.x);
+      minY = minY == null ? kp.y : math.min(minY, kp.y);
+      maxX = maxX == null ? kp.x : math.max(maxX, kp.x);
+      maxY = maxY == null ? kp.y : math.max(maxY, kp.y);
     }
 
-    final src = bounds(source);
-    final tgt = bounds(target);
+    if (minX == null || minY == null || maxX == null || maxY == null) {
+      return const Rect.fromLTWH(0.0, 0.0, 1.0, 1.0);
+    }
+
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  double _poseScaleFactor(pose.PoseFrame source, pose.PoseFrame target) {
+    final src = _poseBounds(source);
+    final tgt = _poseBounds(target);
+
+    final srcW = src.width.clamp(0.001, 1.0);
     final srcH = src.height.clamp(0.001, 1.0);
+    final tgtW = tgt.width.clamp(0.001, 1.0);
     final tgtH = tgt.height.clamp(0.001, 1.0);
 
-    return (tgtH / srcH).clamp(0.7, 1.8);
+    final scaleW = tgtW / srcW;
+    final scaleH = tgtH / srcH;
+
+    return ((scaleW + scaleH) / 2).clamp(0.7, 1.8);
   }
 
   void _openMovenetDataScreen() {
