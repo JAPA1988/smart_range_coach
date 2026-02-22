@@ -272,30 +272,22 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                   child: _buildRasterFrame(
                     width: proVideo.width.toDouble(),
                     height: proVideo.height.toDouble(),
-                    child: Center(
-                      child: Transform.scale(
-                        scale: scale,
-                        alignment: Alignment.center,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Image.asset(
-                              _selectedProSwing!
-                                  .imagePathForPosition(_selectedPosition),
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) {
-                                return CustomPaint(
-                                  painter: _ComparisonGridPainter(),
-                                );
-                              },
+                    child: Transform.scale(
+                      scale: scale,
+                      alignment: Alignment.center,
+                      child: Stack(
+                        children: [
+                          Image.asset(
+                            _selectedProSwing!
+                                .imagePathForPosition(_selectedPosition),
+                            fit: BoxFit.contain,
+                          ),
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: PoseOverlayPainter(proPose),
                             ),
-                            Positioned.fill(
-                              child: CustomPaint(
-                                painter: PoseOverlayPainter(proPose),
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
