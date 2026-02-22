@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/reference_swing.dart';
@@ -14,12 +13,8 @@ class ReferenceSwingService {
     final swings = <ReferenceSwing>[];
 
     for (final swingId in _swingIds) {
-      try {
-        final swing = await loadSwing(swingId);
-        swings.add(swing);
-      } catch (e) {
-        debugPrint('Error loading swing $swingId: $e');
-      }
+      final swing = await loadSwing(swingId);
+      swings.add(swing);
     }
 
     return swings;

@@ -1,8 +1,7 @@
-import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../screens/comparison_movenet_data_screen.dart';
 import '../models/pose_frame.dart' as pose;
@@ -67,10 +66,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   Future<void> _loadProSwings() async {
     try {
       final service = ReferenceSwingService();
-      var swings = await service.loadAllSwings();
-      if (swings.isEmpty) {
-        swings = await _loadFallbackProSwings();
-      }
+      final swings = await service.loadAllSwings();
       if (!mounted) return;
       setState(() {
         _proSwings = swings;
@@ -78,98 +74,12 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
         _loading = false;
       });
     } catch (e) {
-      try {
-        final fallback = await _loadFallbackProSwings();
-        if (!mounted) return;
-        setState(() {
-          _proSwings = fallback;
-          _selectedProSwing = fallback.isNotEmpty ? fallback.first : null;
-          _error = fallback.isEmpty ? 'Failed to load pro swings: $e' : null;
-          _loading = false;
-        });
-      } catch (_) {
-        if (!mounted) return;
-        setState(() {
-          _error = 'Failed to load pro swings: $e';
-          _loading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _error = 'Failed to load pro swings: $e';
+        _loading = false;
+      });
     }
-  }
-
-  Future<List<ref.ReferenceSwing>> _loadFallbackProSwings() async {
-    final raw = await rootBundle.loadString('assets/pro_swings/sample_pro.json');
-    final doc = jsonDecode(raw) as Map<String, dynamic>;
-    final frames = (doc['frames'] as List<dynamic>? ?? [])
-        .whereType<Map<String, dynamic>>()
-        .toList();
-    if (frames.isEmpty) {
-      return const [];
-    }
-
-    final frameCount = frames.length;
-    final positions = <String, ref.KeyPosition>{};
-    final analysis = <String, ref.PositionAnalysis>{};
-
-    for (int i = 0; i < _positions.length; i++) {
-      final position = _positions[i];
-      final frameIndex = ((frameCount - 1) * (i / (_positions.length - 1)))
-          .round()
-          .clamp(0, frameCount - 1);
-      final frame = frames[frameIndex];
-      final timestampMs = (frame['timestamp_ms'] as num?)?.toInt() ?? 0;
-      final rawKeypoints =
-          (frame['keypoints'] as Map<String, dynamic>? ?? <String, dynamic>{});
-
-      final keypoints = <String, ref.Keypoint>{};
-      for (final entry in rawKeypoints.entries) {
-        final value = entry.value;
-        if (value is Map<String, dynamic>) {
-          keypoints[entry.key] = ref.Keypoint(
-            x: (value['x'] as num?)?.toDouble() ?? 0.0,
-            y: (value['y'] as num?)?.toDouble() ?? 0.0,
-            confidence: (value['score'] as num?)?.toDouble() ?? 0.0,
-          );
-        }
-      }
-
-      positions[position] = ref.KeyPosition(
-        frame: frameIndex,
-        timestampMs: timestampMs,
-        keypoints: keypoints,
-      );
-
-      analysis[position] = ref.PositionAnalysis(
-        spineAngle: 0.0,
-        xFactor: 0.0,
-        shoulderRotation: 0.0,
-        hipRotation: 0.0,
-        leftArmAngle: 0.0,
-        rightArmAngle: 0.0,
-        leftKneeAngle: 0.0,
-        rightKneeAngle: 0.0,
-      );
-    }
-
-    final fallbackSwing = ref.ReferenceSwing(
-      swingId: 'sample_pro',
-      golferName: (doc['player'] as String?) ?? 'Sample Pro',
-      clubType: (doc['club'] as String?) ?? 'Unknown',
-      skillLevel: 'Pro',
-      videoInfo: ref.VideoInfo(
-        fps: 30,
-        width: 1280,
-        height: 720,
-        totalFrames: frameCount,
-        durationSeconds:
-            ((frames.last['timestamp_ms'] as num?)?.toDouble() ?? 0.0) / 1000,
-      ),
-      keyPositions: _positions,
-      positions: positions,
-      analysis: analysis,
-    );
-
-    return [fallbackSwing];
   }
 
   @override
@@ -291,6 +201,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       return const Center(child: Text('Position data not available'));
     }
 
+    final proScale = _computeProScaleToUser(userPosition, proPosition);
+
     return Row(
       children: [
         // User
@@ -358,26 +270,33 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                   child: _buildRasterFrame(
                     width: proVideo.width.toDouble(),
                     height: proVideo.height.toDouble(),
-                    child: Image.asset(
-                      _selectedProSwing!.imagePathForPosition(_selectedPosition),
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) {
-                        return Stack(
-                          children: [
-                            Positioned.fill(
-                              child: CustomPaint(
-                                  painter: _ComparisonGridPainter()),
-                            ),
-                            Positioned.fill(
-                              child: CustomPaint(
-                                painter: PoseOverlayPainter(
-                                  _proToPoseFrame(proPosition),
+                    child: ClipRect(
+                      child: Transform.scale(
+                        scale: proScale,
+                        alignment: Alignment.center,
+                        child: Image.asset(
+                          _selectedProSwing!
+                              .imagePathForPosition(_selectedPosition),
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) {
+                            return Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: CustomPaint(
+                                      painter: _ComparisonGridPainter()),
                                 ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                                Positioned.fill(
+                                  child: CustomPaint(
+                                    painter: PoseOverlayPainter(
+                                      _proToPoseFrame(proPosition),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -467,6 +386,52 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       frameIndex: pos.frameIndex,
       keypoints: keypoints,
       qualityScore: 0.0,
+    );
+  }
+
+  double _computeProScaleToUser(
+    user.UserKeyPosition userPosition,
+    ref.KeyPosition proPosition,
+  ) {
+    final userDistance = _noseToAnkleDistanceUser(userPosition.keypoints);
+    final proDistance = _noseToAnkleDistancePro(proPosition.keypoints);
+
+    if (userDistance == null || proDistance == null || proDistance <= 0.0) {
+      return 1.0;
+    }
+
+    return (userDistance / proDistance).clamp(0.6, 2.4);
+  }
+
+  double? _noseToAnkleDistanceUser(Map<String, user.Keypoint> keypoints) {
+    final nose = keypoints['nose'];
+    final leftAnkle = keypoints['left_ankle'];
+    final rightAnkle = keypoints['right_ankle'];
+    if (nose == null || leftAnkle == null || rightAnkle == null) {
+      return null;
+    }
+
+    final ankleMidX = (leftAnkle.x + rightAnkle.x) / 2.0;
+    final ankleMidY = (leftAnkle.y + rightAnkle.y) / 2.0;
+    return math.sqrt(
+      math.pow(ankleMidX - nose.x, 2).toDouble() +
+          math.pow(ankleMidY - nose.y, 2).toDouble(),
+    );
+  }
+
+  double? _noseToAnkleDistancePro(Map<String, ref.Keypoint> keypoints) {
+    final nose = keypoints['nose'];
+    final leftAnkle = keypoints['left_ankle'];
+    final rightAnkle = keypoints['right_ankle'];
+    if (nose == null || leftAnkle == null || rightAnkle == null) {
+      return null;
+    }
+
+    final ankleMidX = (leftAnkle.x + rightAnkle.x) / 2.0;
+    final ankleMidY = (leftAnkle.y + rightAnkle.y) / 2.0;
+    return math.sqrt(
+      math.pow(ankleMidX - nose.x, 2).toDouble() +
+          math.pow(ankleMidY - nose.y, 2).toDouble(),
     );
   }
 

@@ -1,6 +1,6 @@
 class ReferenceSwing {
   static const Map<String, String> _imageNameMap = {
-    'address': 'adress',
+    'address': 'address',
     'takeaway': 'takeaway',
     'set_position': 'set_position',
     'top_position': 'top_position',
