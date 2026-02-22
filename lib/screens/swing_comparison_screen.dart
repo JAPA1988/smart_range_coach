@@ -275,32 +275,25 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                   child: _buildRasterFrame(
                     width: proVideo.width.toDouble(),
                     height: proVideo.height.toDouble(),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final dx = transform.offsetX * constraints.maxWidth;
-                        final dy = transform.offsetY * constraints.maxHeight;
-
-                        return ClipRect(
-                          child: Transform(
-                            transform: Matrix4.identity()
-                              ..translate(dx, dy)
-                              ..scale(transform.scaleX, transform.scaleY),
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                      painter: _ComparisonGridPainter()),
-                                ),
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: PoseOverlayPainter(proPose),
-                                  ),
-                                ),
-                              ],
+                    child: Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.diagonal3Values(
+                        transform.scaleX,
+                        transform.scaleY,
+                        1.0,
+                      ),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: CustomPaint(painter: _ComparisonGridPainter()),
+                          ),
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: PoseOverlayPainter(proPose),
                             ),
                           ),
-                        );
-                      },
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -478,9 +471,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   }
 
   _PoseTransform _poseTransform(pose.PoseFrame source, pose.PoseFrame target) {
-    final src = _poseBounds(source);
-    final tgt = _poseBounds(target);
-
     final srcW = _poseWidth(source);
     final srcH = _poseHeight(source);
     final tgtW = _poseWidth(target);
@@ -489,19 +479,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final scaleX = (tgtW / srcW).clamp(_minScale, _maxScale);
     final scaleY = (tgtH / srcH).clamp(_minScale, _maxScale);
 
-    final srcCx = src.left + (src.width / 2);
-    final srcCy = src.top + (src.height / 2);
-    final tgtCx = tgt.left + (tgt.width / 2);
-    final tgtCy = tgt.top + (tgt.height / 2);
-
-    final offsetX = tgtCx - (srcCx * scaleX);
-    final offsetY = tgtCy - (srcCy * scaleY);
-
     return _PoseTransform(
       scaleX: scaleX,
       scaleY: scaleY,
-      offsetX: offsetX,
-      offsetY: offsetY,
     );
   }
 
@@ -538,13 +518,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 class _PoseTransform {
   final double scaleX;
   final double scaleY;
-  final double offsetX;
-  final double offsetY;
 
   const _PoseTransform({
     required this.scaleX,
     required this.scaleY,
-    required this.offsetX,
-    required this.offsetY,
   });
 }
