@@ -178,13 +178,11 @@ class KeyPositionSelection {
   final PoseFrame poseFrame;
   final Duration videoPosition;
   final Uint8List imageBytes;
-  final Uint8List rasterBytes;
 
   KeyPositionSelection({
     required this.poseFrame,
     required this.videoPosition,
     required this.imageBytes,
-    required this.rasterBytes,
   });
 }
 
@@ -1434,23 +1432,14 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       }
 
       final pixelRatio = View.of(context).devicePixelRatio;
-      final captureSize = boundary.size;
 
       final image = await _captureRepaintBoundary(_videoRepaintKey, pixelRatio);
-      final raster = await _renderRasterImage(
-        snapshot,
-        captureSize,
-        pixelRatio,
-      );
 
       final imageByteData =
           await image.toByteData(format: ui.ImageByteFormat.png);
-      final rasterByteData =
-          await raster.toByteData(format: ui.ImageByteFormat.png);
       image.dispose();
-      raster.dispose();
 
-      if (imageByteData == null || rasterByteData == null) {
+      if (imageByteData == null) {
         throw Exception('Capture failed: no image bytes');
       }
 
@@ -1458,7 +1447,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         poseFrame: snapshot,
         videoPosition: snapshot.timestamp,
         imageBytes: imageByteData.buffer.asUint8List(),
-        rasterBytes: rasterByteData.buffer.asUint8List(),
       );
 
       if (mounted) {
@@ -1505,6 +1493,69 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     );
   }
 
+  Future<PoseFrame?> _recomputePoseFromImage(
+    Uint8List pngBytes,
+    Duration timestamp,
+  ) async {
+    await MoveNetManager.init();
+
+    final codec = await ui.instantiateImageCodec(pngBytes);
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
+    final imageWidth = image.width;
+    final imageHeight = image.height;
+
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    image.dispose();
+    if (byteData == null) return null;
+
+    final rgba = byteData.buffer.asUint8List();
+    final kps = await _runMoveNetOnRgba(rgba, imageWidth, imageHeight);
+    if (kps == null || kps.length < 17) return null;
+
+    const names = [
+      'nose',
+      'left_eye',
+      'right_eye',
+      'left_ear',
+      'right_ear',
+      'left_shoulder',
+      'right_shoulder',
+      'left_elbow',
+      'right_elbow',
+      'left_wrist',
+      'right_wrist',
+      'left_hip',
+      'right_hip',
+      'left_knee',
+      'right_knee',
+      'left_ankle',
+      'right_ankle',
+    ];
+
+    final keypoints = <String, Keypoint>{};
+    for (int i = 0; i < names.length; i++) {
+      final kp = kps[i];
+      keypoints[names[i]] = Keypoint(
+        label: names[i],
+        x: kp['x'] ?? 0.0,
+        y: kp['y'] ?? 0.0,
+        confidence: kp['score'] ?? 0.0,
+      );
+    }
+
+    final quality = PoseValidator.calculatePoseQuality(
+      keypoints.map((k, v) => MapEntry(k, v.toJson())),
+    );
+
+    return PoseFrame(
+      timestamp: timestamp,
+      frameIndex: -1,
+      keypoints: keypoints,
+      qualityScore: quality,
+    );
+  }
+
   Future<void> _saveKeyPositions() async {
     if (!_allKeyPositionsMarked || _savingKeyPositions) return;
 
@@ -1540,9 +1591,47 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
             '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.json';
 
         await File(imagePath).writeAsBytes(selection.imageBytes);
-        await File(rasterPath).writeAsBytes(selection.rasterBytes);
 
-        final keypointsJson = selection.poseFrame.keypoints.map((key, kp) {
+        final recomputed = await _recomputePoseFromImage(
+          selection.imageBytes,
+          selection.videoPosition,
+        );
+
+        if (recomputed == null) {
+          if (kDebugMode) {
+            debugPrint('⚠️ Recompute failed for ${keyPositionSlug(position)}');
+          }
+          continue;
+        }
+
+        final codec = await ui.instantiateImageCodec(selection.imageBytes);
+        final frame = await codec.getNextFrame();
+        final image = frame.image;
+        final captureSize =
+            Size(image.width.toDouble(), image.height.toDouble());
+        image.dispose();
+
+        const pixelRatio = 1.0;
+        final raster = await _renderRasterImage(
+          recomputed,
+          captureSize,
+          pixelRatio,
+        );
+        final rasterBytes =
+            await raster.toByteData(format: ui.ImageByteFormat.png);
+        raster.dispose();
+
+        if (rasterBytes == null) {
+          if (kDebugMode) {
+            debugPrint(
+                '⚠️ Raster encode failed for ${keyPositionSlug(position)}');
+          }
+          continue;
+        }
+
+        await File(rasterPath).writeAsBytes(rasterBytes.buffer.asUint8List());
+
+        final keypointsJson = recomputed.keypoints.map((key, kp) {
           return MapEntry(key, {
             'x': kp.x,
             'y': kp.y,
@@ -1552,10 +1641,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
         final doc = {
           'position': keyPositionSlug(position),
-          'timestamp_ms': selection.poseFrame.timestamp.inMilliseconds,
+          'timestamp_ms': recomputed.timestamp.inMilliseconds,
           'video_position_ms': selection.videoPosition.inMilliseconds,
-          'frame_index': selection.poseFrame.frameIndex,
-          'quality_score': selection.poseFrame.qualityScore,
+          'frame_index': recomputed.frameIndex,
+          'quality_score': recomputed.qualityScore,
           'image_path': imagePath,
           'raster_path': rasterPath,
           'keypoints': keypointsJson,
