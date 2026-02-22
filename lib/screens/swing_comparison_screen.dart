@@ -47,6 +47,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   bool _loading = true;
   String? _error;
 
+  static const double _minScale = 0.7;
+  static const double _maxScale = 2.2;
+
   final List<String> _positions = [
     'address',
     'takeaway',
@@ -203,7 +206,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
     final userPose = _userToPoseFrame(userPosition);
     final proPose = _proToPoseFrame(proPosition);
-    final scale = _poseScaleFactor(proPose, userPose);
+    final transform = _poseTransform(proPose, userPose);
 
     return Row(
       children: [
@@ -272,21 +275,34 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                   child: _buildRasterFrame(
                     width: proVideo.width.toDouble(),
                     height: proVideo.height.toDouble(),
-                    child: Transform.scale(
-                      scale: scale,
-                      alignment: Alignment.center,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: CustomPaint(painter: _ComparisonGridPainter()),
-                          ),
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: PoseOverlayPainter(proPose),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final dx = transform.offsetX * constraints.maxWidth;
+                        final dy = transform.offsetY * constraints.maxHeight;
+
+                        return ClipRect(
+                          child: Transform.translate(
+                            offset: Offset(dx, dy),
+                            child: Transform.scale(
+                              scale: transform.scale,
+                              alignment: Alignment.topLeft,
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                        painter: _ComparisonGridPainter()),
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: PoseOverlayPainter(proPose),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -430,7 +446,28 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final scaleW = tgtW / srcW;
     final scaleH = tgtH / srcH;
 
-    return ((scaleW + scaleH) / 2).clamp(0.7, 1.8);
+    return math.max(scaleW, scaleH).clamp(_minScale, _maxScale);
+  }
+
+  _PoseTransform _poseTransform(pose.PoseFrame source, pose.PoseFrame target) {
+    final src = _poseBounds(source);
+    final tgt = _poseBounds(target);
+
+    final scale = _poseScaleFactor(source, target);
+
+    final srcCx = src.left + (src.width / 2);
+    final srcCy = src.top + (src.height / 2);
+    final tgtCx = tgt.left + (tgt.width / 2);
+    final tgtCy = tgt.top + (tgt.height / 2);
+
+    final offsetX = tgtCx - (srcCx * scale);
+    final offsetY = tgtCy - (srcCy * scale);
+
+    return _PoseTransform(
+      scale: scale,
+      offsetX: offsetX,
+      offsetY: offsetY,
+    );
   }
 
   void _openMovenetDataScreen() {
@@ -461,4 +498,16 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
         .map((word) => word[0].toUpperCase() + word.substring(1))
         .join(' ');
   }
+}
+
+class _PoseTransform {
+  final double scale;
+  final double offsetX;
+  final double offsetY;
+
+  const _PoseTransform({
+    required this.scale,
+    required this.offsetX,
+    required this.offsetY,
+  });
 }

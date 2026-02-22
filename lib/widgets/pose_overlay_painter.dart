@@ -116,9 +116,9 @@ class PoseOverlayPainter extends CustomPainter {
         );
 
         final suffix = kp.label.startsWith('left_')
-            ? 'l'
-            : kp.label.startsWith('right_')
-                ? 'r'
+          ? 'L'
+          : kp.label.startsWith('right_')
+            ? 'R'
                 : null;
 
         if (suffix != null) {
