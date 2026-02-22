@@ -201,7 +201,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       return const Center(child: Text('Position data not available'));
     }
 
-    final proScale = _computeProScaleToUser(userPosition, proPosition);
+    final userPose = _userToPoseFrame(userPosition);
+    final proPose = _proToPoseFrame(proPosition);
+    final scale = _poseScaleFactor(proPose, userPose);
 
     return Row(
       children: [
@@ -270,31 +272,29 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                   child: _buildRasterFrame(
                     width: proVideo.width.toDouble(),
                     height: proVideo.height.toDouble(),
-                    child: ClipRect(
+                    child: Center(
                       child: Transform.scale(
-                        scale: proScale,
+                        scale: scale,
                         alignment: Alignment.center,
-                        child: Image.asset(
-                          _selectedProSwing!
-                              .imagePathForPosition(_selectedPosition),
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) {
-                            return Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                      painter: _ComparisonGridPainter()),
-                                ),
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: PoseOverlayPainter(
-                                      _proToPoseFrame(proPosition),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.asset(
+                              _selectedProSwing!
+                                  .imagePathForPosition(_selectedPosition),
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) {
+                                return CustomPaint(
+                                  painter: _ComparisonGridPainter(),
+                                );
+                              },
+                            ),
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: PoseOverlayPainter(proPose),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -389,50 +389,40 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     );
   }
 
-  double _computeProScaleToUser(
-    user.UserKeyPosition userPosition,
-    ref.KeyPosition proPosition,
-  ) {
-    final userDistance = _noseToAnkleDistanceUser(userPosition.keypoints);
-    final proDistance = _noseToAnkleDistancePro(proPosition.keypoints);
+  double _poseScaleFactor(pose.PoseFrame source, pose.PoseFrame target) {
+    Rect bounds(pose.PoseFrame frame) {
+      const names = [
+        'left_shoulder',
+        'right_shoulder',
+        'left_hip',
+        'right_hip',
+        'left_knee',
+        'right_knee',
+        'left_ankle',
+        'right_ankle',
+      ];
 
-    if (userDistance == null || proDistance == null || proDistance <= 0.0) {
-      return 1.0;
+      double? minX, minY, maxX, maxY;
+      for (final n in names) {
+        final kp = frame.getKeypoint(n);
+        if (kp == null || !kp.isVisible) continue;
+        minX = minX == null ? kp.x : math.min(minX, kp.x);
+        minY = minY == null ? kp.y : math.min(minY, kp.y);
+        maxX = maxX == null ? kp.x : math.max(maxX, kp.x);
+        maxY = maxY == null ? kp.y : math.max(maxY, kp.y);
+      }
+
+      return (minX == null || minY == null || maxX == null || maxY == null)
+          ? const Rect.fromLTWH(0, 0, 1, 1)
+          : Rect.fromLTRB(minX, minY, maxX, maxY);
     }
 
-    return (userDistance / proDistance).clamp(0.6, 2.4);
-  }
+    final src = bounds(source);
+    final tgt = bounds(target);
+    final srcH = src.height.clamp(0.001, 1.0);
+    final tgtH = tgt.height.clamp(0.001, 1.0);
 
-  double? _noseToAnkleDistanceUser(Map<String, user.Keypoint> keypoints) {
-    final nose = keypoints['nose'];
-    final leftAnkle = keypoints['left_ankle'];
-    final rightAnkle = keypoints['right_ankle'];
-    if (nose == null || leftAnkle == null || rightAnkle == null) {
-      return null;
-    }
-
-    final ankleMidX = (leftAnkle.x + rightAnkle.x) / 2.0;
-    final ankleMidY = (leftAnkle.y + rightAnkle.y) / 2.0;
-    return math.sqrt(
-      math.pow(ankleMidX - nose.x, 2).toDouble() +
-          math.pow(ankleMidY - nose.y, 2).toDouble(),
-    );
-  }
-
-  double? _noseToAnkleDistancePro(Map<String, ref.Keypoint> keypoints) {
-    final nose = keypoints['nose'];
-    final leftAnkle = keypoints['left_ankle'];
-    final rightAnkle = keypoints['right_ankle'];
-    if (nose == null || leftAnkle == null || rightAnkle == null) {
-      return null;
-    }
-
-    final ankleMidX = (leftAnkle.x + rightAnkle.x) / 2.0;
-    final ankleMidY = (leftAnkle.y + rightAnkle.y) / 2.0;
-    return math.sqrt(
-      math.pow(ankleMidX - nose.x, 2).toDouble() +
-          math.pow(ankleMidY - nose.y, 2).toDouble(),
-    );
+    return (tgtH / srcH).clamp(0.7, 1.8);
   }
 
   void _openMovenetDataScreen() {
