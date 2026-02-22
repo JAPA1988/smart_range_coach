@@ -1405,8 +1405,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     if (!_canMarkKeyPosition()) return;
 
     final ctrl = _controller!;
-    final closest =
-        _closestPoseFrame(ctrl.value.position) ?? _currentPoseFrame!;
+    final capturePosition = ctrl.value.position;
+
+    final closest = _closestPoseFrame(capturePosition) ?? _currentPoseFrame!;
     final copiedKeypoints = <String, Keypoint>{};
     for (final entry in closest.keypoints.entries) {
       final kp = entry.value;
@@ -1418,7 +1419,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       );
     }
     final snapshot = PoseFrame(
-      timestamp: closest.timestamp,
+      timestamp: capturePosition,
       frameIndex: closest.frameIndex,
       keypoints: copiedKeypoints,
       qualityScore: closest.qualityScore,
@@ -1445,7 +1446,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
       _markedKeyPositions[position] = KeyPositionSelection(
         poseFrame: snapshot,
-        videoPosition: snapshot.timestamp,
+        videoPosition: capturePosition,
         imageBytes: imageByteData.buffer.asUint8List(),
       );
 
@@ -1590,8 +1591,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final jsonPath =
             '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.json';
 
-        await File(imagePath).writeAsBytes(selection.imageBytes);
-
         final recomputed = await _recomputePoseFromImage(
           selection.imageBytes,
           selection.videoPosition,
@@ -1603,6 +1602,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
           }
           continue;
         }
+
+        await File(imagePath).writeAsBytes(selection.imageBytes);
 
         final codec = await ui.instantiateImageCodec(selection.imageBytes);
         final frame = await codec.getNextFrame();
@@ -1845,7 +1846,23 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     return interpolated;
   }
 
-  int _movenetInputSize = 256;
+  int _movenetInputSize = 192;
+
+  int _getMoveNetInputSize() {
+    final interpreter = MoveNetManager.interpreter;
+    if (interpreter == null) return _movenetInputSize;
+    try {
+      final shape = interpreter.getInputTensor(0).shape;
+      if (shape.length >= 3) {
+        final int h = shape[1];
+        final int w = shape[2];
+        if (h > 0 && w > 0 && h == w) {
+          return h;
+        }
+      }
+    } catch (_) {}
+    return _movenetInputSize;
+  }
 
   Future<void> _initVideo() async {
     setState(() {
@@ -2297,8 +2314,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       _movenetCallCount = 0;
       _movenetLastLog = DateTime.now();
     }
-    final sizesToTry =
-        _movenetInputSize == 192 ? const [192] : <int>[_movenetInputSize, 192];
+    final int expectedSize = _getMoveNetInputSize();
+    final sizesToTry = <int>[expectedSize];
 
     for (final size in sizesToTry) {
       try {
@@ -2363,8 +2380,8 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   Future<Map<String, Object?>?> _runMoveNetWithRaw(
       Uint8List rgba, int w, int h) async {
     if (MoveNetManager.interpreter == null) return null;
-    final sizesToTry =
-        _movenetInputSize == 192 ? const [192] : <int>[_movenetInputSize, 192];
+    final int expectedSize = _getMoveNetInputSize();
+    final sizesToTry = <int>[expectedSize];
 
     for (final size in sizesToTry) {
       try {
@@ -2507,7 +2524,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       String? movenetError;
 
       try {
-        final int size = _movenetInputSize;
+        final int size = _getMoveNetInputSize();
         final Map<String, dynamic> prep = await compute(_resizeNormalize, {
           'rgba': rgba,
           'w': w,
