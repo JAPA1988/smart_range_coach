@@ -281,24 +281,22 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                         final dy = transform.offsetY * constraints.maxHeight;
 
                         return ClipRect(
-                          child: Transform.translate(
-                            offset: Offset(dx, dy),
-                            child: Transform.scale(
-                              scale: transform.scale,
-                              alignment: Alignment.topLeft,
-                              child: Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                        painter: _ComparisonGridPainter()),
+                          child: Transform(
+                            transform: Matrix4.identity()
+                              ..translate(dx, dy)
+                              ..scale(transform.scaleX, transform.scaleY),
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: CustomPaint(
+                                      painter: _ComparisonGridPainter()),
+                                ),
+                                Positioned.fill(
+                                  child: CustomPaint(
+                                    painter: PoseOverlayPainter(proPose),
                                   ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: PoseOverlayPainter(proPose),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           ),
                         );
@@ -434,37 +432,74 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     return Rect.fromLTRB(minX!, minY!, maxX!, maxY!);
   }
 
-  double _poseScaleFactor(pose.PoseFrame source, pose.PoseFrame target) {
-    final src = _poseBounds(source);
-    final tgt = _poseBounds(target);
+  double? _distance(pose.PoseFrame frame, String a, String b) {
+    final ka = frame.getKeypoint(a);
+    final kb = frame.getKeypoint(b);
+    if (ka == null || kb == null || !ka.isVisible || !kb.isVisible) {
+      return null;
+    }
+    final dx = ka.x - kb.x;
+    final dy = ka.y - kb.y;
+    return math.sqrt(dx * dx + dy * dy);
+  }
 
-    final srcW = src.width.clamp(0.001, 1.0);
-    final srcH = src.height.clamp(0.001, 1.0);
-    final tgtW = tgt.width.clamp(0.001, 1.0);
-    final tgtH = tgt.height.clamp(0.001, 1.0);
+  double _poseWidth(pose.PoseFrame frame) {
+    final shoulder = _distance(frame, 'left_shoulder', 'right_shoulder');
+    final hip = _distance(frame, 'left_hip', 'right_hip');
 
-    final scaleW = tgtW / srcW;
-    final scaleH = tgtH / srcH;
+    final values = [
+      if (shoulder != null) shoulder,
+      if (hip != null) hip,
+    ];
 
-    return math.max(scaleW, scaleH).clamp(_minScale, _maxScale);
+    if (values.isNotEmpty) {
+      return values.reduce((a, b) => a + b) / values.length;
+    }
+
+    final bounds = _poseBounds(frame);
+    return bounds.width.clamp(0.001, 1.0);
+  }
+
+  double _poseHeight(pose.PoseFrame frame) {
+    final left = _distance(frame, 'left_shoulder', 'left_ankle');
+    final right = _distance(frame, 'right_shoulder', 'right_ankle');
+
+    final values = [
+      if (left != null) left,
+      if (right != null) right,
+    ];
+
+    if (values.isNotEmpty) {
+      return values.reduce((a, b) => a + b) / values.length;
+    }
+
+    final bounds = _poseBounds(frame);
+    return bounds.height.clamp(0.001, 1.0);
   }
 
   _PoseTransform _poseTransform(pose.PoseFrame source, pose.PoseFrame target) {
     final src = _poseBounds(source);
     final tgt = _poseBounds(target);
 
-    final scale = _poseScaleFactor(source, target);
+    final srcW = _poseWidth(source);
+    final srcH = _poseHeight(source);
+    final tgtW = _poseWidth(target);
+    final tgtH = _poseHeight(target);
+
+    final scaleX = (tgtW / srcW).clamp(_minScale, _maxScale);
+    final scaleY = (tgtH / srcH).clamp(_minScale, _maxScale);
 
     final srcCx = src.left + (src.width / 2);
     final srcCy = src.top + (src.height / 2);
     final tgtCx = tgt.left + (tgt.width / 2);
     final tgtCy = tgt.top + (tgt.height / 2);
 
-    final offsetX = tgtCx - (srcCx * scale);
-    final offsetY = tgtCy - (srcCy * scale);
+    final offsetX = tgtCx - (srcCx * scaleX);
+    final offsetY = tgtCy - (srcCy * scaleY);
 
     return _PoseTransform(
-      scale: scale,
+      scaleX: scaleX,
+      scaleY: scaleY,
       offsetX: offsetX,
       offsetY: offsetY,
     );
@@ -501,12 +536,14 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 }
 
 class _PoseTransform {
-  final double scale;
+  final double scaleX;
+  final double scaleY;
   final double offsetX;
   final double offsetY;
 
   const _PoseTransform({
-    required this.scale,
+    required this.scaleX,
+    required this.scaleY,
     required this.offsetX,
     required this.offsetY,
   });
