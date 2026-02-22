@@ -39,6 +39,16 @@ class KeyPositionsReviewScreen extends StatefulWidget {
 }
 
 class _KeyPositionsReviewScreenState extends State<KeyPositionsReviewScreen> {
+  static const List<String> _positionOrder = [
+    'address',
+    'takeaway',
+    'set_position',
+    'top_position',
+    'downswing',
+    'impact',
+    'follow_through',
+  ];
+
   static const Map<String, String> _positionTitles = {
     'address': 'Address',
     'takeaway': 'Takeaway',
@@ -93,7 +103,11 @@ class _KeyPositionsReviewScreenState extends State<KeyPositionsReviewScreen> {
       }
 
       if (_entries.isNotEmpty) {
-        _selectedPosition = _entries.keys.first;
+        _selectedPosition = _positionOrder
+            .firstWhere((pos) => _entries.containsKey(pos), orElse: () => '');
+        if (_selectedPosition!.isEmpty) {
+          _selectedPosition = _entries.keys.first;
+        }
       }
     } catch (_) {
       // noop
@@ -123,7 +137,9 @@ class _KeyPositionsReviewScreenState extends State<KeyPositionsReviewScreen> {
                           const SizedBox(width: 12),
                           DropdownButton<String>(
                             value: _selectedPosition,
-                            items: _entries.keys.map((pos) {
+                            items: _positionOrder
+                                .where((pos) => _entries.containsKey(pos))
+                                .map((pos) {
                               return DropdownMenuItem<String>(
                                 value: pos,
                                 child: Text(_positionTitles[pos] ?? pos),

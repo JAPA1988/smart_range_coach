@@ -26,6 +26,7 @@ import 'screens/key_positions_review_screen.dart';
 import 'models/pose_validator.dart';
 import 'models/pose_frame.dart';
 import 'models/user_swing.dart' hide Keypoint;
+import 'models/user_swing.dart' as user_model;
 
 // Widgets
 import 'widgets/pose_overlay_painter.dart';
@@ -1687,6 +1688,63 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     }
   }
 
+  Map<String, user_model.UserKeyPosition>? _buildMarkedPositionsForComparison() {
+    if (_markedKeyPositions.isEmpty) return null;
+
+    final mapped = <String, user_model.UserKeyPosition>{};
+    for (final entry in _markedKeyPositions.entries) {
+      final slug = keyPositionSlug(entry.key);
+      final selection = entry.value;
+
+      final convertedKeypoints = <String, user_model.Keypoint>{};
+      for (final kpEntry in selection.poseFrame.keypoints.entries) {
+        final kp = kpEntry.value;
+        convertedKeypoints[kpEntry.key] = user_model.Keypoint(
+          x: kp.x,
+          y: kp.y,
+          confidence: kp.confidence,
+        );
+      }
+
+      mapped[slug] = user_model.UserKeyPosition(
+        frameIndex: selection.poseFrame.frameIndex,
+        timestampMs: selection.videoPosition.inMilliseconds,
+        keypoints: convertedKeypoints,
+        markedAt: DateTime.now(),
+      );
+    }
+
+    return mapped;
+  }
+
+  Future<void> _openComparisonScreen() async {
+    try {
+      final analysisService = VideoAnalysisService();
+      var userSwing = await analysisService.analyzeVideo(widget.videoPath);
+
+      final markedPositions = _buildMarkedPositionsForComparison();
+      if (markedPositions != null && markedPositions.isNotEmpty) {
+        userSwing = userSwing.copyWith(markedPositions: markedPositions);
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SwingComparisonScreen(
+            userSwing: userSwing,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Vergleich konnte nicht geöffnet werden: $e'),
+        ),
+      );
+    }
+  }
+
   PoseFrame _smoothPoseFrame(PoseFrame frame) {
     final smoothed = <String, Keypoint>{};
 
@@ -3166,93 +3224,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 ),
                               ),
                             // Detected lines are intentionally hidden in review UI.
-                            // Prominent floating Analyse button at bottom-right of the video
-                            Positioned(
-                              bottom: 12,
-                              right: 12,
-                              child: FloatingActionButton.extended(
-                                heroTag: 'analyse_frame',
-                                backgroundColor: Colors.blueAccent,
-                                icon: const Icon(Icons.search),
-                                label: _analysisRunning
-                                    ? const Text('Analysiere...')
-                                    : const Text('Analyse'),
-                                onPressed: _analysisRunning ||
-                                        !ctrl.value.isInitialized
-                                    ? null
-                                    : () async {
-                                        try {
-                                          await ctrl.pause();
-                                          if (mounted) {
-                                            setState(() {});
-                                          }
-                                          await _captureAndAnalyzeFrame();
-                                        } catch (e) {
-                                          if (kDebugMode)
-                                            debugPrint('Analyse FAB error: $e');
-                                        }
-                                      },
-                              ),
-                            ),
-                            // Vergleich mit Profi Button
-                            Positioned(
-                              bottom: 80,
-                              right: 12,
-                              child: FloatingActionButton.extended(
-                                heroTag: 'compare_pro',
-                                backgroundColor: Colors.purple,
-                                icon: const Icon(Icons.compare_arrows),
-                                label: const Text('Vergleich'),
-                                onPressed: () async {
-                                  final poseJsonPath =
-                                      _poseJsonPathFromVideoPath(
-                                          widget.videoPath);
-                                  final file = File(poseJsonPath);
-
-                                  if (await file.exists()) {
-                                    try {
-                                      final analysisService =
-                                          VideoAnalysisService();
-                                      final userSwing =
-                                          await analysisService.analyzeVideo(
-                                        widget.videoPath,
-                                      );
-                                      if (!mounted) return;
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => SwingComparisonScreen(
-                                            userSwing: userSwing,
-                                          ),
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                              'Analyse laden fehlgeschlagen: $e'),
-                                        ),
-                                      );
-                                    }
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: const Text(
-                                            'Bitte zuerst Video mit MoveNet analysieren'),
-                                        action: SnackBarAction(
-                                          label: 'Analysieren',
-                                          onPressed: () async {
-                                            await _analyzeVideoAndSaveShoulders(
-                                                widget.videoPath);
-                                          },
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                },
-                              ),
-                            ),
                           ],
                         ),
                       ),
@@ -3398,35 +3369,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                           },
                         ),
                         const SizedBox(height: 8),
-                        const Text('Markiere, was du in diesem Swing erkennst',
-                            style: TextStyle(color: Colors.white70)),
-                        const SizedBox(height: 8),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Column(
-                              children: Issue.values.map((issue) {
-                                return CheckboxListTile(
-                                  value: _selected.contains(issue),
-                                  onChanged: (v) {
-                                    setState(() {
-                                      if (v == true) {
-                                        _selected.add(issue);
-                                      } else {
-                                        _selected.remove(issue);
-                                      }
-                                    });
-                                  },
-                                  title: Text(issueTitle(issue)),
-                                  dense: true,
-                                  controlAffinity:
-                                      ListTileControlAffinity.leading,
-                                );
-                              }).toList(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
                         Card(
                           color: Colors.blueGrey.shade900,
                           child: Padding(
@@ -3471,6 +3413,17 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                     label: _savingKeyPositions
                                         ? const Text('Speichere...')
                                         : const Text('Alles speichern'),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed: _savingKeyPositions
+                                        ? null
+                                        : _openComparisonScreen,
+                                    icon: const Icon(Icons.compare_arrows),
+                                    label: const Text('Vergleich öffnen'),
                                   ),
                                 ),
                               ],
@@ -3534,55 +3487,13 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                         min: 0.0,
                                         max: 1.0,
                                         divisions: 20,
-                                        label: _minKeypointScore
-                                            .toStringAsFixed(2),
                                         onChanged: (v) {
                                           setState(() {
                                             _minKeypointScore = v;
                                           });
                                         },
+                                        activeColor: Colors.deepOrangeAccent,
                                       ),
-                                    ),
-                                    SizedBox(
-                                      width: 40,
-                                      child: Text(
-                                        _minKeypointScore.toStringAsFixed(2),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16),
-                                        textAlign: TextAlign.right,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    ElevatedButton.icon(
-                                      onPressed: (_lastKeypoints == null &&
-                                              _detectedLines.isEmpty)
-                                          ? null
-                                          : () async {
-                                              await _exportLastResults();
-                                            },
-                                      icon:
-                                          const Icon(Icons.download, size: 18),
-                                      label: const Text('Export JSON'),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    ElevatedButton.icon(
-                                      onPressed: _analysisRunning
-                                          ? null
-                                          : () async {
-                                              await _dumpDebugJson();
-                                            },
-                                      icon: const Icon(Icons.bug_report,
-                                          size: 18),
-                                      label: const Text('Debug'),
-                                      style: ElevatedButton.styleFrom(
-                                          backgroundColor:
-                                              Colors.deepOrangeAccent),
                                     ),
                                   ],
                                 ),
