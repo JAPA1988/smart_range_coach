@@ -3,8 +3,12 @@ import '../models/pose_frame.dart';
 
 class PoseOverlayPainter extends CustomPainter {
   final PoseFrame? poseFrame;
+  final bool requireBodyPresence;
 
-  PoseOverlayPainter(this.poseFrame);
+  PoseOverlayPainter(
+    this.poseFrame, {
+    this.requireBodyPresence = true,
+  });
 
   static const List<List<String>> connections = [
     // Kopf zu Schultern
@@ -33,7 +37,11 @@ class PoseOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // Early return wenn kein Frame
-    if (poseFrame == null || !poseFrame!.isBodyPresent) {
+    if (poseFrame == null) {
+      return;
+    }
+
+    if (requireBodyPresence && !poseFrame!.isBodyPresent) {
       return;
     }
 

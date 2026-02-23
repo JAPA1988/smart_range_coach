@@ -14,7 +14,7 @@ class _ComparisonGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white24
+      ..color = Colors.white54
       ..strokeWidth = 1.0
       ..style = PaintingStyle.stroke;
 
@@ -206,7 +206,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
     final userPose = _userToPoseFrame(userPosition);
     final proPose = _proToPoseFrame(proPosition);
-    final transform = _poseTransform(proPose, userPose);
+    final scaledProPose = _scalePoseToMatch(proPose, userPose);
 
     return Row(
       children: [
@@ -275,25 +275,20 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                   child: _buildRasterFrame(
                     width: proVideo.width.toDouble(),
                     height: proVideo.height.toDouble(),
-                    child: Transform(
-                      alignment: Alignment.center,
-                      transform: Matrix4.diagonal3Values(
-                        transform.scaleX,
-                        transform.scaleY,
-                        1.0,
-                      ),
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: CustomPaint(painter: _ComparisonGridPainter()),
-                          ),
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: PoseOverlayPainter(proPose),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: CustomPaint(painter: _ComparisonGridPainter()),
+                        ),
+                        Positioned.fill(
+                          child: CustomPaint(
+                            painter: PoseOverlayPainter(
+                              scaledProPose,
+                              requireBodyPresence: false,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -392,15 +387,25 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       'right_shoulder',
       'left_hip',
       'right_hip',
+      'left_elbow',
+      'right_elbow',
+      'left_wrist',
+      'right_wrist',
+      'left_knee',
+      'right_knee',
+      'left_ankle',
+      'right_ankle',
     ];
 
     double? minX, minY, maxX, maxY;
+    int included = 0;
 
     void include(double x, double y) {
       minX = minX == null ? x : math.min(minX!, x);
       minY = minY == null ? y : math.min(minY!, y);
       maxX = maxX == null ? x : math.max(maxX!, x);
       maxY = maxY == null ? y : math.max(maxY!, y);
+      included++;
     }
 
     for (final name in names) {
@@ -409,11 +414,26 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       include(kp.x, kp.y);
     }
 
-    // Address-Fallback: verwende vorhandene Punkte auch bei niedriger Confidence.
-    if (minX == null || minY == null || maxX == null || maxY == null) {
+    // Fallback 1: gleiche Kernpunkte auch bei niedriger Confidence.
+    if (included < 2) {
       for (final name in names) {
         final kp = frame.getKeypoint(name);
         if (kp == null) continue;
+        include(kp.x, kp.y);
+      }
+    }
+
+    // Fallback 2 (wichtig für Address): nutze alle verfügbaren MoveNet-Punkte.
+    if (included < 2) {
+      for (final kp in frame.keypoints.values) {
+        if (!kp.isVisible) continue;
+        include(kp.x, kp.y);
+      }
+    }
+
+    // Fallback 3: alle Keypoints unabhängig von Confidence.
+    if (included < 2) {
+      for (final kp in frame.keypoints.values) {
         include(kp.x, kp.y);
       }
     }
@@ -422,66 +442,63 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       return const Rect.fromLTWH(0.0, 0.0, 1.0, 1.0);
     }
 
+    final width = (maxX! - minX!).abs();
+    final height = (maxY! - minY!).abs();
+    const minSize = 0.001;
+
+    if (width < minSize || height < minSize) {
+      final cx = (minX! + maxX!) / 2;
+      final cy = (minY! + maxY!) / 2;
+      final halfW = math.max(width / 2, minSize / 2);
+      final halfH = math.max(height / 2, minSize / 2);
+      return Rect.fromLTRB(
+        (cx - halfW).clamp(0.0, 1.0),
+        (cy - halfH).clamp(0.0, 1.0),
+        (cx + halfW).clamp(0.0, 1.0),
+        (cy + halfH).clamp(0.0, 1.0),
+      );
+    }
+
     return Rect.fromLTRB(minX!, minY!, maxX!, maxY!);
   }
 
-  double? _distance(pose.PoseFrame frame, String a, String b) {
-    final ka = frame.getKeypoint(a);
-    final kb = frame.getKeypoint(b);
-    if (ka == null || kb == null || !ka.isVisible || !kb.isVisible) {
-      return null;
-    }
-    final dx = ka.x - kb.x;
-    final dy = ka.y - kb.y;
-    return math.sqrt(dx * dx + dy * dy);
-  }
+  pose.PoseFrame _scalePoseToMatch(
+    pose.PoseFrame source,
+    pose.PoseFrame target,
+  ) {
+    final src = _poseBounds(source);
+    final tgt = _poseBounds(target);
 
-  double _poseWidth(pose.PoseFrame frame) {
-    final shoulder = _distance(frame, 'left_shoulder', 'right_shoulder');
-    final hip = _distance(frame, 'left_hip', 'right_hip');
+    final safeSrcWidth = math.max(src.width, 0.001);
+    final safeSrcHeight = math.max(src.height, 0.001);
 
-    final values = [
-      if (shoulder != null) shoulder,
-      if (hip != null) hip,
-    ];
+    final scaleX = (tgt.width / safeSrcWidth).clamp(_minScale, _maxScale);
+    final scaleY = (tgt.height / safeSrcHeight).clamp(_minScale, _maxScale);
 
-    if (values.isNotEmpty) {
-      return values.reduce((a, b) => a + b) / values.length;
-    }
+    final srcCx = src.left + src.width / 2;
+    final srcCy = src.top + src.height / 2;
+    final tgtCx = tgt.left + tgt.width / 2;
+    final tgtCy = tgt.top + tgt.height / 2;
 
-    final bounds = _poseBounds(frame);
-    return bounds.width.clamp(0.001, 1.0);
-  }
+    final scaled = <String, pose.Keypoint>{};
+    for (final entry in source.keypoints.entries) {
+      final kp = entry.value;
+      final x = ((kp.x - srcCx) * scaleX + tgtCx).clamp(0.0, 1.0);
+      final y = ((kp.y - srcCy) * scaleY + tgtCy).clamp(0.0, 1.0);
 
-  double _poseHeight(pose.PoseFrame frame) {
-    final left = _distance(frame, 'left_shoulder', 'left_ankle');
-    final right = _distance(frame, 'right_shoulder', 'right_ankle');
-
-    final values = [
-      if (left != null) left,
-      if (right != null) right,
-    ];
-
-    if (values.isNotEmpty) {
-      return values.reduce((a, b) => a + b) / values.length;
+      scaled[entry.key] = pose.Keypoint(
+        label: kp.label,
+        x: x,
+        y: y,
+        confidence: kp.confidence,
+      );
     }
 
-    final bounds = _poseBounds(frame);
-    return bounds.height.clamp(0.001, 1.0);
-  }
-
-  _PoseTransform _poseTransform(pose.PoseFrame source, pose.PoseFrame target) {
-    final srcW = _poseWidth(source);
-    final srcH = _poseHeight(source);
-    final tgtW = _poseWidth(target);
-    final tgtH = _poseHeight(target);
-
-    final scaleX = (tgtW / srcW).clamp(_minScale, _maxScale);
-    final scaleY = (tgtH / srcH).clamp(_minScale, _maxScale);
-
-    return _PoseTransform(
-      scaleX: scaleX,
-      scaleY: scaleY,
+    return pose.PoseFrame(
+      timestamp: source.timestamp,
+      frameIndex: source.frameIndex,
+      keypoints: scaled,
+      qualityScore: source.qualityScore,
     );
   }
 
@@ -515,12 +532,3 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   }
 }
 
-class _PoseTransform {
-  final double scaleX;
-  final double scaleY;
-
-  const _PoseTransform({
-    required this.scaleX,
-    required this.scaleY,
-  });
-}
