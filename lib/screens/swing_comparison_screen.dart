@@ -208,95 +208,266 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final proPose = _proToPoseFrame(proPosition);
     final scaledProPose = _scalePoseToMatch(proPose, userPose);
 
-    return Row(
+    return Column(
       children: [
-        // User
         Expanded(
-          child: Column(
+          child: Row(
             children: [
-              const Padding(
-                padding: EdgeInsets.all(8),
-                child: Text(
-                  'Your Swing',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              // User
+              Expanded(
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Text(
+                        'Your Swing',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        color: Colors.black,
+                        child: _buildRasterFrame(
+                          width: proVideo.width.toDouble(),
+                          height: proVideo.height.toDouble(),
+                          child: userPosition.skeletonImagePath != null
+                              ? Image.file(
+                                  File(userPosition.skeletonImagePath!),
+                                  fit: BoxFit.contain,
+                                )
+                              : Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                          painter: _ComparisonGridPainter()),
+                                    ),
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: PoseOverlayPainter(userPose),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              Container(width: 2, color: Colors.grey[400]),
+              // Pro
               Expanded(
-                child: Container(
-                  color: Colors.black,
-                  child: _buildRasterFrame(
-                    width: proVideo.width.toDouble(),
-                    height: proVideo.height.toDouble(),
-                    child: userPosition.skeletonImagePath != null
-                        ? Image.file(
-                            File(userPosition.skeletonImagePath!),
-                            fit: BoxFit.contain,
-                          )
-                        : Stack(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        _selectedProSwing!.golferName,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        color: Colors.black,
+                        child: _buildRasterFrame(
+                          width: proVideo.width.toDouble(),
+                          height: proVideo.height.toDouble(),
+                          child: Stack(
                             children: [
                               Positioned.fill(
-                                child: CustomPaint(
-                                    painter: _ComparisonGridPainter()),
+                                child:
+                                    CustomPaint(painter: _ComparisonGridPainter()),
                               ),
                               Positioned.fill(
                                 child: CustomPaint(
                                   painter: PoseOverlayPainter(
-                                    _userToPoseFrame(userPosition),
+                                    scaledProPose,
+                                    requireBodyPresence: false,
                                   ),
                                 ),
                               ),
                             ],
                           ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(width: 2, color: Colors.grey[400]),
-        // Pro
-        Expanded(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  _selectedProSwing!.golferName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Container(
-                  color: Colors.black,
-                  child: _buildRasterFrame(
-                    width: proVideo.width.toDouble(),
-                    height: proVideo.height.toDouble(),
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: CustomPaint(painter: _ComparisonGridPainter()),
                         ),
-                        Positioned.fill(
-                          child: CustomPaint(
-                            painter: PoseOverlayPainter(
-                              scaledProPose,
-                              requireBodyPresence: false,
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
+        if (_selectedPosition == 'address') _buildMetricsTable(userPose, proPose),
       ],
+    );
+  }
+
+  double? _angleBetween(Offset a, Offset b, Offset c) {
+    final ab = a - b;
+    final cb = c - b;
+    final dot = ab.dx * cb.dx + ab.dy * cb.dy;
+    final mag = ab.distance * cb.distance;
+    if (mag == 0) return null;
+    final cos = (dot / mag).clamp(-1.0, 1.0);
+    return math.acos(cos) * 180 / math.pi;
+  }
+
+  double? _lineAngle(Offset a, Offset b) {
+    final dx = b.dx - a.dx;
+    final dy = b.dy - a.dy;
+    if (dx == 0 && dy == 0) return null;
+    return math.atan2(dy, dx) * 180 / math.pi;
+  }
+
+  Offset? _kp(pose.PoseFrame frame, String label) {
+    final kp = frame.getKeypoint(label);
+    if (kp == null || !kp.isVisible) return null;
+    return Offset(kp.x, kp.y);
+  }
+
+  double? _kneeFlexRight(pose.PoseFrame frame) {
+    final hip = _kp(frame, 'right_hip');
+    final knee = _kp(frame, 'right_knee');
+    final ankle = _kp(frame, 'right_ankle');
+    if (hip == null || knee == null || ankle == null) return null;
+    return _angleBetween(hip, knee, ankle);
+  }
+
+  double? _spineAngle(pose.PoseFrame frame) {
+    final hipL = _kp(frame, 'left_hip');
+    final hipR = _kp(frame, 'right_hip');
+    final shL = _kp(frame, 'left_shoulder');
+    final shR = _kp(frame, 'right_shoulder');
+    if (hipL == null || hipR == null || shL == null || shR == null) return null;
+
+    final hipMid = Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2);
+    final shMid = Offset((shL.dx + shR.dx) / 2, (shL.dy + shR.dy) / 2);
+
+    final dy = hipMid.dy - shMid.dy;
+    final dx = hipMid.dx - shMid.dx;
+    if (dy == 0 && dx == 0) return null;
+
+    return (math.atan2(dx, dy).abs()) * 180 / math.pi;
+  }
+
+  double? _shoulderVsHipAngle(pose.PoseFrame frame) {
+    final shL = _kp(frame, 'left_shoulder');
+    final shR = _kp(frame, 'right_shoulder');
+    final hipL = _kp(frame, 'left_hip');
+    final hipR = _kp(frame, 'right_hip');
+    if (shL == null || shR == null || hipL == null || hipR == null) return null;
+
+    final shoulderAngle = _lineAngle(shL, shR);
+    final hipAngle = _lineAngle(hipL, hipR);
+    if (shoulderAngle == null || hipAngle == null) return null;
+
+    return (shoulderAngle - hipAngle).abs();
+  }
+
+  double? _horizontalHipToAnkleRight(pose.PoseFrame frame) {
+    final hip = _kp(frame, 'right_hip');
+    final ank = _kp(frame, 'right_ankle');
+    if (hip == null || ank == null) return null;
+    return (hip.dx - ank.dx).abs() * 100;
+  }
+
+  double? _horizontalWristToShoulderRight(pose.PoseFrame frame) {
+    final wr = _kp(frame, 'right_wrist');
+    final sh = _kp(frame, 'right_shoulder');
+    if (wr == null || sh == null) return null;
+    return (wr.dx - sh.dx).abs() * 100;
+  }
+
+  Widget _buildMetricsTable(pose.PoseFrame userPose, pose.PoseFrame proPose) {
+    String fmt(double? v, {int decimals = 1, String suffix = ''}) =>
+        v == null ? '—' : '${v.toStringAsFixed(decimals)}$suffix';
+
+    final rows = [
+      (
+        'Knee Flex (R)',
+        fmt(_kneeFlexRight(userPose), suffix: '°'),
+        fmt(_kneeFlexRight(proPose), suffix: '°')
+      ),
+      (
+        'Spine Angle',
+        fmt(_spineAngle(userPose), suffix: '°'),
+        fmt(_spineAngle(proPose), suffix: '°')
+      ),
+      (
+        'Shoulder vs Hip',
+        fmt(_shoulderVsHipAngle(userPose), suffix: '°'),
+        fmt(_shoulderVsHipAngle(proPose), suffix: '°')
+      ),
+      (
+        'Δ Hip–Ankle (R)',
+        fmt(_horizontalHipToAnkleRight(userPose), suffix: '%'),
+        fmt(_horizontalHipToAnkleRight(proPose), suffix: '%')
+      ),
+      (
+        'Δ Wrist–Shoulder (R)',
+        fmt(_horizontalWristToShoulderRight(userPose), suffix: '%'),
+        fmt(_horizontalWristToShoulderRight(proPose), suffix: '%')
+      ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Address Metrics',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Table(
+            columnWidths: const {
+              0: FlexColumnWidth(2.4),
+              1: FlexColumnWidth(1.1),
+              2: FlexColumnWidth(1.1),
+            },
+            children: [
+              const TableRow(children: [
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text('Metric',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text('User',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text('Pro',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ]),
+              for (final row in rows)
+                TableRow(children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(row.$1),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(row.$2),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(row.$3),
+                  ),
+                ]),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

@@ -3177,52 +3177,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                           ctrl.value.size.height)),
                                 ),
                               ),
-                            // Large centered play button overlay when paused/still
-                            if (!(ctrl.value.isPlaying))
-                              Positioned.fill(
-                                child: Container(
-                                  color: Colors.black26,
-                                  child: Center(
-                                    child: SizedBox(
-                                      width: 96,
-                                      height: 96,
-                                      child: ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          shape: const CircleBorder(),
-                                          backgroundColor: Colors.white70,
-                                          foregroundColor: Colors.black87,
-                                          elevation: 6,
-                                        ),
-                                        onPressed: () async {
-                                          try {
-                                            // If at end, rewind a bit or to start
-                                            final dur = ctrl.value.duration;
-                                            final pos = ctrl.value.position;
-                                            if (dur != Duration.zero &&
-                                                pos >=
-                                                    dur -
-                                                        const Duration(
-                                                            milliseconds:
-                                                                150)) {
-                                              await ctrl.seekTo(Duration.zero);
-                                            }
-                                            await ctrl.play();
-                                          } catch (e) {
-                                            if (kDebugMode)
-                                              debugPrint(
-                                                  'Play overlay error: $e');
-                                          }
-                                          if (mounted) {
-                                            setState(() {});
-                                          }
-                                        },
-                                        child: const Icon(Icons.play_arrow,
-                                            size: 48),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
                             // Detected lines are intentionally hidden in review UI.
                           ],
                         ),
