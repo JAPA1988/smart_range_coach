@@ -46,6 +46,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   String _selectedPosition = 'address';
   bool _loading = true;
   String? _error;
+  bool _showSpineMarker = true;
+  bool _showHipOverAnkleMarker = true;
+  bool _showShoulderOverHandMarker = true;
+  bool _showKneeFlexMarker = true;
 
   static const double _minScale = 0.7;
   static const double _maxScale = 2.2;
@@ -114,7 +118,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       body: Column(
         children: [
           _buildProSwingSelector(),
-          _buildPositionSelector(),
           _buildDataScreenButton(),
           Expanded(child: _buildSideBySideComparison()),
         ],
@@ -226,30 +229,58 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       ),
                     ),
                     Expanded(
-                      child: Container(
-                        color: Colors.black,
-                        child: _buildRasterFrame(
-                          width: proVideo.width.toDouble(),
-                          height: proVideo.height.toDouble(),
-                          child: userPosition.skeletonImagePath != null
-                              ? Image.file(
-                                  File(userPosition.skeletonImagePath!),
-                                  fit: BoxFit.contain,
-                                )
-                              : Stack(
-                                  children: [
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                          painter: _ComparisonGridPainter()),
-                                    ),
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                        painter: PoseOverlayPainter(userPose),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              color: Colors.black,
+                              child: _buildRasterFrame(
+                                width: proVideo.width.toDouble(),
+                                height: proVideo.height.toDouble(),
+                                child: userPosition.skeletonImagePath != null
+                                    ? Image.file(
+                                        File(userPosition.skeletonImagePath!),
+                                        fit: BoxFit.contain,
+                                      )
+                                    : Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: CustomPaint(
+                                                painter:
+                                                    _ComparisonGridPainter()),
+                                          ),
+                                          Positioned.fill(
+                                            child: CustomPaint(
+                                              painter: PoseOverlayPainter(
+                                                  userPose),
+                                            ),
+                                          ),
+                                          Positioned.fill(
+                                            child: CustomPaint(
+                                              painter: _UserMarkerPainter(
+                                                userPose: userPose,
+                                                proPose: proPose,
+                                                showSpineMarker:
+                                                    _showSpineMarker,
+                                                showHipOverAnkleMarker:
+                                                    _showHipOverAnkleMarker,
+                                                showShoulderOverHandMarker:
+                                                    _showShoulderOverHandMarker,
+                                                showKneeFlexMarker:
+                                                    _showKneeFlexMarker,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ),
-                                  ],
-                                ),
-                        ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 160,
+                            child: _buildMarkerPanel(),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -302,6 +333,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
             ],
           ),
         ),
+        _buildPositionSelector(),
         if (_selectedPosition == 'address') _buildMetricsTable(userPose, proPose),
       ],
     );
@@ -335,7 +367,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final knee = _kp(frame, 'right_knee');
     final ankle = _kp(frame, 'right_ankle');
     if (hip == null || knee == null || ankle == null) return null;
-    return _angleBetween(hip, knee, ankle);
+    final kneeAngle = _angleBetween(hip, knee, ankle);
+    if (kneeAngle == null) return null;
+    return 180.0 - kneeAngle;
   }
 
   double? _spineAngle(pose.PoseFrame frame) {
@@ -482,6 +516,46 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
           label: const Text('MoveNet Daten öffnen'),
         ),
       ),
+    );
+  }
+
+  Widget _buildMarkerPanel() {
+    return Container(
+      color: Colors.black.withOpacity(0.05),
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Marker',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          _buildMarkerToggle('Spine Angle', _showSpineMarker,
+              (v) => setState(() => _showSpineMarker = v)),
+          _buildMarkerToggle('Hips over Ankles', _showHipOverAnkleMarker,
+              (v) => setState(() => _showHipOverAnkleMarker = v)),
+          _buildMarkerToggle(
+              'Shoulder over Hands',
+              _showShoulderOverHandMarker,
+              (v) => setState(() => _showShoulderOverHandMarker = v)),
+          _buildMarkerToggle('Knee Flex', _showKneeFlexMarker,
+              (v) => setState(() => _showKneeFlexMarker = v)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMarkerToggle(
+      String label, bool value, ValueChanged<bool> onChanged) {
+    return Row(
+      children: [
+        Switch(
+          value: value,
+          onChanged: onChanged,
+        ),
+        Expanded(child: Text(label)),
+      ],
     );
   }
 
@@ -673,6 +747,55 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     );
   }
 
+  pose.PoseFrame _normalizePose(pose.PoseFrame frame) {
+    final shL = _kp(frame, 'left_shoulder');
+    final shR = _kp(frame, 'right_shoulder');
+    final hipL = _kp(frame, 'left_hip');
+    final hipR = _kp(frame, 'right_hip');
+
+    if (shL == null || shR == null || hipL == null || hipR == null) {
+      return frame;
+    }
+
+    final shoulderMid = Offset((shL.dx + shR.dx) / 2, (shL.dy + shR.dy) / 2);
+    final hipMid = Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2);
+
+    final angle = math.atan2(shR.dy - shL.dy, shR.dx - shL.dx);
+    final cosA = math.cos(-angle);
+    final sinA = math.sin(-angle);
+
+    final torso = (shoulderMid - hipMid).distance;
+    final safeTorso = math.max(torso, 0.001);
+
+    final normalized = <String, pose.Keypoint>{};
+    for (final entry in frame.keypoints.entries) {
+      final kp = entry.value;
+
+      final dx = kp.x - hipMid.dx;
+      final dy = kp.y - hipMid.dy;
+
+      final rx = dx * cosA - dy * sinA;
+      final ry = dx * sinA + dy * cosA;
+
+      final nx = rx / safeTorso;
+      final ny = ry / safeTorso;
+
+      normalized[entry.key] = pose.Keypoint(
+        label: kp.label,
+        x: nx,
+        y: ny,
+        confidence: kp.confidence,
+      );
+    }
+
+    return pose.PoseFrame(
+      timestamp: frame.timestamp,
+      frameIndex: frame.frameIndex,
+      keypoints: normalized,
+      qualityScore: frame.qualityScore,
+    );
+  }
+
   void _openMovenetDataScreen() {
     final userPosition = _effectiveUserPositions()[_selectedPosition];
     final proPosition = _selectedProSwing?.positions[_selectedPosition];
@@ -701,5 +824,102 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
         .map((word) => word[0].toUpperCase() + word.substring(1))
         .join(' ');
   }
+}
+
+class _UserMarkerPainter extends CustomPainter {
+  final pose.PoseFrame userPose;
+  final pose.PoseFrame proPose;
+  final bool showSpineMarker;
+  final bool showHipOverAnkleMarker;
+  final bool showShoulderOverHandMarker;
+  final bool showKneeFlexMarker;
+
+  _UserMarkerPainter({
+    required this.userPose,
+    required this.proPose,
+    required this.showSpineMarker,
+    required this.showHipOverAnkleMarker,
+    required this.showShoulderOverHandMarker,
+    required this.showKneeFlexMarker,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.red
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+
+    Offset? kp(String label, pose.PoseFrame f) {
+      final k = f.getKeypoint(label);
+      if (k == null || !k.isVisible) return null;
+      return Offset(k.x * size.width, k.y * size.height);
+    }
+
+    if (showSpineMarker) {
+      final hipL = kp('left_hip', userPose);
+      final hipR = kp('right_hip', userPose);
+      final shL = kp('left_shoulder', proPose);
+      final shR = kp('right_shoulder', proPose);
+      final hipLPro = kp('left_hip', proPose);
+      final hipRPro = kp('right_hip', proPose);
+
+      if (hipL != null &&
+          hipR != null &&
+          shL != null &&
+          shR != null &&
+          hipLPro != null &&
+          hipRPro != null) {
+        final hipMid = Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2);
+
+        final proHipMid =
+            Offset((hipLPro.dx + hipRPro.dx) / 2, (hipLPro.dy + hipRPro.dy) / 2);
+        final proShoulderMid =
+            Offset((shL.dx + shR.dx) / 2, (shL.dy + shR.dy) / 2);
+
+        final dx = proHipMid.dx - proShoulderMid.dx;
+        final dy = proHipMid.dy - proShoulderMid.dy;
+        final angle = math.atan2(dx, dy);
+
+        final length = size.height * 0.6;
+        final end = Offset(
+          hipMid.dx + length * math.sin(angle),
+          hipMid.dy - length * math.cos(angle),
+        );
+        canvas.drawLine(hipMid, end, paint);
+      }
+    }
+
+    if (showHipOverAnkleMarker) {
+      final hip = kp('right_hip', userPose);
+      final ankle = kp('right_ankle', userPose);
+      if (hip != null && ankle != null) {
+        final end = Offset(hip.dx, ankle.dy);
+        canvas.drawLine(hip, end, paint);
+      }
+    }
+
+    if (showShoulderOverHandMarker) {
+      final shoulder = kp('right_shoulder', userPose);
+      final wrist = kp('right_wrist', userPose);
+      if (shoulder != null && wrist != null) {
+        final end = Offset(shoulder.dx, wrist.dy);
+        canvas.drawLine(shoulder, end, paint);
+      }
+    }
+
+    if (showKneeFlexMarker) {
+      final hip = kp('right_hip', userPose);
+      final knee = kp('right_knee', userPose);
+      final ankle = kp('right_ankle', userPose);
+      if (hip != null && knee != null && ankle != null) {
+        canvas.drawLine(hip, knee, paint);
+        canvas.drawLine(knee, ankle, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _UserMarkerPainter oldDelegate) => true;
 }
 

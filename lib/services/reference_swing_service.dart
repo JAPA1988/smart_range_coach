@@ -6,7 +6,7 @@ import '../models/reference_swing.dart';
 
 class ReferenceSwingService {
   static const List<String> _swingIds = [
-    'swing_2_michael_7iron',
+    'swing_1_andy_7iron',
   ];
 
   Future<List<ReferenceSwing>> loadAllSwings() async {

@@ -31,6 +31,11 @@ flutter:
     - assets/movenet_singlepose_lightning.tflite
     - assets/pro_swings/sample_pro.json
     - assets/reference_swings/
+    - assets/reference_swings/swing_1_andy_7iron/metadata.json
+    - assets/reference_swings/swing_1_andy_7iron/key_positions.json
+    - assets/reference_swings/swing_1_andy_7iron/position_analysis.json
+    - assets/reference_swings/swing_1_andy_7iron/video.mp4
+    - assets/reference_swings/swing_1_andy_7iron/images/
     - assets/reference_swings/swing_2_michael_7iron/metadata.json
     - assets/reference_swings/swing_2_michael_7iron/key_positions.json
     - assets/reference_swings/swing_2_michael_7iron/position_analysis.json
