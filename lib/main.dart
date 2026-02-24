@@ -704,8 +704,17 @@ class CameraSmokeTestApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+enum AnalysisMode { fullSwing, keyPositions }
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  AnalysisMode _analysisMode = AnalysisMode.fullSwing;
 
   @override
   Widget build(BuildContext context) {
@@ -717,13 +726,42 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            SizedBox(
+              width: 280,
+              child: Column(
+                children: [
+                  RadioListTile<AnalysisMode>(
+                    title: const Text('Analyze full swing'),
+                    value: AnalysisMode.fullSwing,
+                    groupValue: _analysisMode,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() => _analysisMode = v);
+                    },
+                  ),
+                  RadioListTile<AnalysisMode>(
+                    title: const Text('Analyze Key Positions'),
+                    value: AnalysisMode.keyPositions,
+                    groupValue: _analysisMode,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() => _analysisMode = v);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: () async {
                 final nav = Navigator.of(context);
                 RecordSwingScreen.lastAnalyzedVideoPath = null;
                 final result = await nav.push(
                   MaterialPageRoute(
-                    builder: (_) => const RecordSwingScreen(),
+                    builder: (_) => RecordSwingScreen(
+                      analyzeFullSwing:
+                          _analysisMode == AnalysisMode.fullSwing,
+                    ),
                   ),
                 );
 

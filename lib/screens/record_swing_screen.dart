@@ -11,7 +11,12 @@ import '../services/video_analysis_service.dart';
 class RecordSwingScreen extends StatefulWidget {
   static String? lastAnalyzedVideoPath;
 
-  const RecordSwingScreen({super.key});
+  final bool analyzeFullSwing;
+
+  const RecordSwingScreen({
+    super.key,
+    this.analyzeFullSwing = true,
+  });
 
   @override
   State<RecordSwingScreen> createState() => _RecordSwingScreenState();
@@ -55,6 +60,13 @@ class _RecordSwingScreenState extends State<RecordSwingScreen> {
       }
 
       setState(() => _isLaunchingCamera = false);
+
+      if (!widget.analyzeFullSwing) {
+        RecordSwingScreen.lastAnalyzedVideoPath = videoPath;
+        Navigator.pop(context, _fallbackSwing(videoPath));
+        return;
+      }
+
       await _analyzeVideo(videoPath);
     } catch (e) {
       if (!mounted) return;
