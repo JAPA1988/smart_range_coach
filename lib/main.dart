@@ -1774,7 +1774,21 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   Future<void> _openComparisonScreen() async {
     try {
       final analysisService = VideoAnalysisService();
-      var userSwing = await analysisService.analyzeVideo(widget.videoPath);
+      user_model.UserSwing userSwing;
+
+      if (widget.analyzeFullSwing) {
+        userSwing = await analysisService.analyzeVideo(widget.videoPath);
+      } else {
+        final fileName = widget.videoPath.split(Platform.pathSeparator).last;
+        final id = fileName.replaceAll('.mp4', '');
+        userSwing = user_model.UserSwing(
+          id: id,
+          videoPath: widget.videoPath,
+          recordedAt: DateTime.now(),
+          frames: const [],
+          status: user_model.AnalysisStatus.completed,
+        );
+      }
 
       final markedPositions = _buildMarkedPositionsForComparison();
       if (markedPositions != null && markedPositions.isNotEmpty) {
