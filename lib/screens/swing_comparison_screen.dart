@@ -54,6 +54,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   static const double _minScale = 0.7;
   static const double _maxScale = 2.2;
   static const double _metricsMinConfidence = 0.1;
+  static const double _userHeightCm = 175.0;
+  static const double _proHeightCm = 183.0;
 
   final List<String> _positions = [
     'address',
@@ -211,7 +213,12 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
     final userPose = _userToPoseFrame(userPosition);
     final proPose = _proToPoseFrame(proPosition);
-    final scaledProPose = _scalePoseToMatch(proPose, userPose);
+    final scaledProPose = _scalePoseToMatch(
+      proPose,
+      userPose,
+      sourceHeightCm: _proHeightCm,
+      targetHeightCm: _userHeightCm,
+    );
 
     return SingleChildScrollView(
       child: Column(
@@ -719,6 +726,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   pose.PoseFrame _scalePoseToMatch(
     pose.PoseFrame source,
     pose.PoseFrame target,
+    {
+    required double sourceHeightCm,
+    required double targetHeightCm,
+  }
   ) {
     final src = _poseBounds(source);
     final tgt = _poseBounds(target);
@@ -726,8 +737,21 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final safeSrcWidth = math.max(src.width, 0.001);
     final safeSrcHeight = math.max(src.height, 0.001);
 
-    final scaleX = (tgt.width / safeSrcWidth).clamp(_minScale, _maxScale);
-    final scaleY = (tgt.height / safeSrcHeight).clamp(_minScale, _maxScale);
+    var scaleX = (tgt.width / safeSrcWidth);
+    var scaleY = (tgt.height / safeSrcHeight);
+
+    final srcPoseHeight = math.max(_poseHeight(source), 0.001);
+    final tgtPoseHeight = math.max(_poseHeight(target), 0.001);
+
+    final srcPxPerCm = srcPoseHeight / sourceHeightCm;
+    final tgtPxPerCm = tgtPoseHeight / targetHeightCm;
+
+    final heightScale = (tgtPxPerCm / srcPxPerCm);
+    scaleX *= heightScale;
+    scaleY *= heightScale;
+
+    scaleX = scaleX.clamp(_minScale, _maxScale);
+    scaleY = scaleY.clamp(_minScale, _maxScale);
 
     final srcCx = src.left + src.width / 2;
     final srcCy = src.top + src.height / 2;
@@ -754,6 +778,22 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       keypoints: scaled,
       qualityScore: source.qualityScore,
     );
+  }
+
+  double _poseHeight(pose.PoseFrame frame) {
+    final shL = _kp(frame, 'left_shoulder');
+    final shR = _kp(frame, 'right_shoulder');
+    final anL = _kp(frame, 'left_ankle');
+    final anR = _kp(frame, 'right_ankle');
+
+    if (shL != null && shR != null && anL != null && anR != null) {
+      final shoulderMid = Offset((shL.dx + shR.dx) / 2, (shL.dy + shR.dy) / 2);
+      final ankleMid = Offset((anL.dx + anR.dx) / 2, (anL.dy + anR.dy) / 2);
+      return (ankleMid - shoulderMid).distance;
+    }
+
+    final bounds = _poseBounds(frame);
+    return bounds.height;
   }
 
   pose.PoseFrame _normalizePose(pose.PoseFrame frame) {
