@@ -1742,12 +1742,64 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     }
   }
 
-  Map<String, user_model.UserKeyPosition>? _buildMarkedPositionsForComparison() {
+  Future<user_model.UserKeyPosition?> _loadKeyPositionFromDisk(
+    String swingId,
+    KeyPosition position,
+  ) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final basePath =
+        '${dir.path}${Platform.pathSeparator}smart_range_coach${Platform.pathSeparator}key_positions';
+
+    final jsonPath =
+        '$basePath${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.json';
+
+    final file = File(jsonPath);
+    if (!await file.exists()) return null;
+
+    final raw = await file.readAsString();
+    final doc = jsonDecode(raw) as Map<String, dynamic>;
+
+    final keypointsJson = Map<String, dynamic>.from(doc['keypoints'] ?? {});
+
+    final convertedKeypoints = <String, user_model.Keypoint>{};
+    keypointsJson.forEach((label, value) {
+      if (value is Map<String, dynamic>) {
+        convertedKeypoints[label] = user_model.Keypoint(
+          x: (value['x'] as num).toDouble(),
+          y: (value['y'] as num).toDouble(),
+          confidence: (value['score'] as num).toDouble(),
+        );
+      }
+    });
+
+    final timestampMs =
+        (doc['video_position_ms'] ?? doc['timestamp_ms'] ?? 0) as int;
+
+    return user_model.UserKeyPosition(
+      frameIndex: (doc['frame_index'] ?? -1) as int,
+      timestampMs: timestampMs,
+      keypoints: convertedKeypoints,
+      markedAt: DateTime.now(),
+    );
+  }
+
+  Future<Map<String, user_model.UserKeyPosition>?>
+      _buildMarkedPositionsForComparison() async {
     if (_markedKeyPositions.isEmpty) return null;
+
+    final swingId =
+        widget.videoPath.split(Platform.pathSeparator).last.replaceAll('.mp4', '');
 
     final mapped = <String, user_model.UserKeyPosition>{};
     for (final entry in _markedKeyPositions.entries) {
       final slug = keyPositionSlug(entry.key);
+
+      final disk = await _loadKeyPositionFromDisk(swingId, entry.key);
+      if (disk != null) {
+        mapped[slug] = disk;
+        continue;
+      }
+
       final selection = entry.value;
 
       final convertedKeypoints = <String, user_model.Keypoint>{};
@@ -1790,7 +1842,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         );
       }
 
-      final markedPositions = _buildMarkedPositionsForComparison();
+      final markedPositions = await _buildMarkedPositionsForComparison();
       if (markedPositions != null && markedPositions.isNotEmpty) {
         userSwing = userSwing.copyWith(markedPositions: markedPositions);
       }

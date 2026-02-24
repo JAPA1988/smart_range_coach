@@ -118,6 +118,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
       body: Column(
         children: [
           _buildProSwingSelector(),
+          _buildPositionSelector(),
           _buildDataScreenButton(),
           Expanded(child: _buildSideBySideComparison()),
         ],
@@ -229,60 +230,47 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       ),
                     ),
                     Expanded(
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              color: Colors.black,
-                              child: _buildRasterFrame(
-                                width: proVideo.width.toDouble(),
-                                height: proVideo.height.toDouble(),
-                                child: userPosition.skeletonImagePath != null
-                                    ? Image.file(
-                                        File(userPosition.skeletonImagePath!),
-                                        fit: BoxFit.contain,
-                                      )
-                                    : Stack(
-                                        children: [
-                                          Positioned.fill(
-                                            child: CustomPaint(
-                                                painter:
-                                                    _ComparisonGridPainter()),
+                          child: Container(
+                            color: Colors.black,
+                            child: _buildRasterFrame(
+                              width: proVideo.width.toDouble(),
+                              height: proVideo.height.toDouble(),
+                              child: userPosition.skeletonImagePath != null
+                                  ? Image.file(
+                                      File(userPosition.skeletonImagePath!),
+                                      fit: BoxFit.contain,
+                                    )
+                                  : Stack(
+                                      children: [
+                                        Positioned.fill(
+                                          child: CustomPaint(
+                                              painter: _ComparisonGridPainter()),
+                                        ),
+                                        Positioned.fill(
+                                          child: CustomPaint(
+                                            painter: PoseOverlayPainter(userPose),
                                           ),
-                                          Positioned.fill(
-                                            child: CustomPaint(
-                                              painter: PoseOverlayPainter(
-                                                  userPose),
+                                        ),
+                                        Positioned.fill(
+                                          child: CustomPaint(
+                                            painter: _UserMarkerPainter(
+                                              userPose: userPose,
+                                              proPose: proPose,
+                                              showSpineMarker: _showSpineMarker,
+                                              showHipOverAnkleMarker:
+                                                  _showHipOverAnkleMarker,
+                                              showShoulderOverHandMarker:
+                                                  _showShoulderOverHandMarker,
+                                              showKneeFlexMarker: _showKneeFlexMarker,
                                             ),
                                           ),
-                                          Positioned.fill(
-                                            child: CustomPaint(
-                                              painter: _UserMarkerPainter(
-                                                userPose: userPose,
-                                                proPose: proPose,
-                                                showSpineMarker:
-                                                    _showSpineMarker,
-                                                showHipOverAnkleMarker:
-                                                    _showHipOverAnkleMarker,
-                                                showShoulderOverHandMarker:
-                                                    _showShoulderOverHandMarker,
-                                                showKneeFlexMarker:
-                                                    _showKneeFlexMarker,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                              ),
+                                        ),
+                                      ],
+                                    ),
                             ),
                           ),
-                          SizedBox(
-                            width: 160,
-                            child: _buildMarkerPanel(),
-                          ),
-                        ],
-                      ),
                     ),
+                        _buildMarkerPanel(),
                   ],
                 ),
               ),
@@ -333,7 +321,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
             ],
           ),
         ),
-        _buildPositionSelector(),
         if (_selectedPosition == 'address') _buildMetricsTable(userPose, proPose),
       ],
     );
