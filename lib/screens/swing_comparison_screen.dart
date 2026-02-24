@@ -46,13 +46,14 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   String _selectedPosition = 'address';
   bool _loading = true;
   String? _error;
-  bool _showSpineMarker = true;
-  bool _showHipOverAnkleMarker = true;
-  bool _showShoulderOverHandMarker = true;
-  bool _showKneeFlexMarker = true;
+  bool _showSpineMarker = false;
+  bool _showHipOverAnkleMarker = false;
+  bool _showShoulderOverHandMarker = false;
+  bool _showKneeFlexMarker = false;
 
   static const double _minScale = 0.7;
   static const double _maxScale = 2.2;
+  static const double _metricsMinConfidence = 0.1;
 
   final List<String> _positions = [
     'address',
@@ -212,10 +213,12 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final proPose = _proToPoseFrame(proPosition);
     final scaledProPose = _scalePoseToMatch(proPose, userPose);
 
-    return Column(
-      children: [
-        Expanded(
-          child: Row(
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          SizedBox(
+            height: _cmToLogicalPx(7.0),
+            child: Row(
             children: [
               // User
               Expanded(
@@ -230,47 +233,52 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       ),
                     ),
                     Expanded(
-                          child: Container(
-                            color: Colors.black,
-                            child: _buildRasterFrame(
-                              width: proVideo.width.toDouble(),
-                              height: proVideo.height.toDouble(),
-                              child: userPosition.skeletonImagePath != null
-                                  ? Image.file(
-                                      File(userPosition.skeletonImagePath!),
-                                      fit: BoxFit.contain,
-                                    )
-                                  : Stack(
-                                      children: [
-                                        Positioned.fill(
-                                          child: CustomPaint(
-                                              painter: _ComparisonGridPainter()),
-                                        ),
-                                        Positioned.fill(
-                                          child: CustomPaint(
-                                            painter: PoseOverlayPainter(userPose),
-                                          ),
-                                        ),
-                                        Positioned.fill(
-                                          child: CustomPaint(
-                                            painter: _UserMarkerPainter(
-                                              userPose: userPose,
-                                              proPose: proPose,
-                                              showSpineMarker: _showSpineMarker,
-                                              showHipOverAnkleMarker:
-                                                  _showHipOverAnkleMarker,
-                                              showShoulderOverHandMarker:
-                                                  _showShoulderOverHandMarker,
-                                              showKneeFlexMarker: _showKneeFlexMarker,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            ),
+                      child: Container(
+                        color: Colors.black,
+                        child: _buildRasterFrame(
+                          width: proVideo.width.toDouble(),
+                          height: proVideo.height.toDouble(),
+                          child: Stack(
+                            children: [
+                              if (userPosition.skeletonImagePath != null)
+                                Positioned.fill(
+                                  child: Image.file(
+                                    File(userPosition.skeletonImagePath!),
+                                    fit: BoxFit.contain,
+                                  ),
+                                ),
+                              Positioned.fill(
+                                child: CustomPaint(
+                                    painter: _ComparisonGridPainter()),
+                              ),
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: PoseOverlayPainter(
+                                    userPose,
+                                    requireBodyPresence: false,
+                                    minConfidence: 0.1,
+                                  ),
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: CustomPaint(
+                                  painter: _UserMarkerPainter(
+                                    userPose: userPose,
+                                    proPose: proPose,
+                                    showSpineMarker: _showSpineMarker,
+                                    showHipOverAnkleMarker:
+                                        _showHipOverAnkleMarker,
+                                    showShoulderOverHandMarker:
+                                        _showShoulderOverHandMarker,
+                                    showKneeFlexMarker: _showKneeFlexMarker,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
+                        ),
+                      ),
                     ),
-                        _buildMarkerPanel(),
                   ],
                 ),
               ),
@@ -320,10 +328,18 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               ),
             ],
           ),
-        ),
-        if (_selectedPosition == 'address') _buildMetricsTable(userPose, proPose),
-      ],
+          ),
+          if (_selectedPosition == 'address')
+            _buildMetricsTable(userPose, proPose),
+          _buildMarkerPanel(),
+        ],
+      ),
     );
+  }
+
+  double _cmToLogicalPx(double cm) {
+    const logicalPixelsPerInch = 160.0;
+    return (cm / 2.54) * logicalPixelsPerInch;
   }
 
   double? _angleBetween(Offset a, Offset b, Offset c) {
@@ -349,10 +365,16 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     return Offset(kp.x, kp.y);
   }
 
+  Offset? _kpForMetrics(pose.PoseFrame frame, String label) {
+    final kp = frame.getKeypoint(label);
+    if (kp == null || kp.confidence < _metricsMinConfidence) return null;
+    return Offset(kp.x, kp.y);
+  }
+
   double? _kneeFlexRight(pose.PoseFrame frame) {
-    final hip = _kp(frame, 'right_hip');
-    final knee = _kp(frame, 'right_knee');
-    final ankle = _kp(frame, 'right_ankle');
+    final hip = _kpForMetrics(frame, 'right_hip');
+    final knee = _kpForMetrics(frame, 'right_knee');
+    final ankle = _kpForMetrics(frame, 'right_ankle');
     if (hip == null || knee == null || ankle == null) return null;
     final kneeAngle = _angleBetween(hip, knee, ankle);
     if (kneeAngle == null) return null;
@@ -360,10 +382,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   }
 
   double? _spineAngle(pose.PoseFrame frame) {
-    final hipL = _kp(frame, 'left_hip');
-    final hipR = _kp(frame, 'right_hip');
-    final shL = _kp(frame, 'left_shoulder');
-    final shR = _kp(frame, 'right_shoulder');
+    final hipL = _kpForMetrics(frame, 'left_hip');
+    final hipR = _kpForMetrics(frame, 'right_hip');
+    final shL = _kpForMetrics(frame, 'left_shoulder');
+    final shR = _kpForMetrics(frame, 'right_shoulder');
     if (hipL == null || hipR == null || shL == null || shR == null) return null;
 
     final hipMid = Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2);
@@ -377,10 +399,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   }
 
   double? _shoulderVsHipAngle(pose.PoseFrame frame) {
-    final shL = _kp(frame, 'left_shoulder');
-    final shR = _kp(frame, 'right_shoulder');
-    final hipL = _kp(frame, 'left_hip');
-    final hipR = _kp(frame, 'right_hip');
+    final shL = _kpForMetrics(frame, 'left_shoulder');
+    final shR = _kpForMetrics(frame, 'right_shoulder');
+    final hipL = _kpForMetrics(frame, 'left_hip');
+    final hipR = _kpForMetrics(frame, 'right_hip');
     if (shL == null || shR == null || hipL == null || hipR == null) return null;
 
     final shoulderAngle = _lineAngle(shL, shR);
@@ -391,15 +413,15 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   }
 
   double? _horizontalHipToAnkleRight(pose.PoseFrame frame) {
-    final hip = _kp(frame, 'right_hip');
-    final ank = _kp(frame, 'right_ankle');
+    final hip = _kpForMetrics(frame, 'right_hip');
+    final ank = _kpForMetrics(frame, 'right_ankle');
     if (hip == null || ank == null) return null;
     return (hip.dx - ank.dx).abs() * 100;
   }
 
   double? _horizontalWristToShoulderRight(pose.PoseFrame frame) {
-    final wr = _kp(frame, 'right_wrist');
-    final sh = _kp(frame, 'right_shoulder');
+    final wr = _kpForMetrics(frame, 'right_wrist');
+    final sh = _kpForMetrics(frame, 'right_shoulder');
     if (wr == null || sh == null) return null;
     return (wr.dx - sh.dx).abs() * 100;
   }
@@ -864,9 +886,12 @@ class _UserMarkerPainter extends CustomPainter {
         final proShoulderMid =
             Offset((shL.dx + shR.dx) / 2, (shL.dy + shR.dy) / 2);
 
-        final dx = proHipMid.dx - proShoulderMid.dx;
+        final dx = proShoulderMid.dx - proHipMid.dx;
         final dy = proHipMid.dy - proShoulderMid.dy;
+        if (dx == 0 && dy == 0) return;
+
         final angle = math.atan2(dx, dy);
+        final proSpineAngleDeg = angle.abs() * 180 / math.pi;
 
         final length = size.height * 0.6;
         final end = Offset(
@@ -874,6 +899,23 @@ class _UserMarkerPainter extends CustomPainter {
           hipMid.dy - length * math.cos(angle),
         );
         canvas.drawLine(hipMid, end, paint);
+
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: '${proSpineAngleDeg.toStringAsFixed(1)}°',
+            style: const TextStyle(
+              color: Colors.red,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+        textPainter.paint(
+          canvas,
+          end + const Offset(6, -6),
+        );
       }
     }
 

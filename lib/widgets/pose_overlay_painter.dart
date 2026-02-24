@@ -4,10 +4,12 @@ import '../models/pose_frame.dart';
 class PoseOverlayPainter extends CustomPainter {
   final PoseFrame? poseFrame;
   final bool requireBodyPresence;
+  final double minConfidence;
 
   PoseOverlayPainter(
     this.poseFrame, {
     this.requireBodyPresence = true,
+    this.minConfidence = 0.35,
   });
 
   static const List<List<String>> connections = [
@@ -85,7 +87,10 @@ class PoseOverlayPainter extends CustomPainter {
       final kp1 = poseFrame!.getKeypoint(conn[0]);
       final kp2 = poseFrame!.getKeypoint(conn[1]);
 
-      if (kp1 != null && kp2 != null && kp1.isVisible && kp2.isVisible) {
+      if (kp1 != null &&
+          kp2 != null &&
+          kp1.confidence >= minConfidence &&
+          kp2.confidence >= minConfidence) {
         canvas.drawLine(
           Offset(kp1.x * size.width, kp1.y * size.height),
           Offset(kp2.x * size.width, kp2.y * size.height),
@@ -96,7 +101,7 @@ class PoseOverlayPainter extends CustomPainter {
 
     // Zeichne Keypoints mit Farben
     for (final kp in poseFrame!.keypoints.values) {
-      if (kp.isVisible) {
+      if (kp.confidence >= minConfidence) {
         final color = keypointColors[kp.label] ?? Colors.white;
 
         final pointPaint = Paint()
@@ -123,11 +128,7 @@ class PoseOverlayPainter extends CustomPainter {
           confidencePaint,
         );
 
-        final suffix = kp.label.startsWith('left_')
-          ? 'L'
-          : kp.label.startsWith('right_')
-            ? 'R'
-                : null;
+        final suffix = _suffixForKeypoint(kp);
 
         if (suffix != null) {
           final textPainter = TextPainter(
@@ -153,6 +154,27 @@ class PoseOverlayPainter extends CustomPainter {
 
     // Optional: Qualitäts-Indikator
     _drawQualityIndicator(canvas, size);
+  }
+
+  String? _suffixForKeypoint(Keypoint kp) {
+    if (poseFrame != null &&
+        (kp.label == 'left_ear' || kp.label == 'right_ear')) {
+      final leftEar = poseFrame!.getKeypoint('left_ear');
+      final rightEar = poseFrame!.getKeypoint('right_ear');
+
+      if (leftEar != null &&
+          rightEar != null &&
+          leftEar.confidence >= minConfidence &&
+          rightEar.confidence >= minConfidence) {
+        if ((leftEar.x - rightEar.x).abs() > 1e-6) {
+          return kp.x <= ((leftEar.x + rightEar.x) / 2.0) ? 'L' : 'R';
+        }
+      }
+    }
+
+    if (kp.label.startsWith('left_')) return 'L';
+    if (kp.label.startsWith('right_')) return 'R';
+    return null;
   }
 
   void _drawQualityIndicator(Canvas canvas, Size size) {
@@ -190,6 +212,8 @@ class PoseOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant PoseOverlayPainter oldDelegate) {
-    return oldDelegate.poseFrame != poseFrame;
+    return oldDelegate.poseFrame != poseFrame ||
+        oldDelegate.requireBodyPresence != requireBodyPresence ||
+        oldDelegate.minConfidence != minConfidence;
   }
 }
