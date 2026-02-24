@@ -1415,14 +1415,16 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
       );
       return false;
     }
-    if (_currentPoseFrame == null || !_currentPoseFrame!.isBodyPresent) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Kein Körper erkannt – Position kann nicht gespeichert werden.'),
-        ),
-      );
-      return false;
+    if (widget.analyzeFullSwing) {
+      if (_currentPoseFrame == null || !_currentPoseFrame!.isBodyPresent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Kein Körper erkannt – Position kann nicht gespeichert werden.'),
+          ),
+        );
+        return false;
+      }
     }
     return true;
   }
@@ -1458,22 +1460,24 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     final ctrl = _controller!;
     final capturePosition = ctrl.value.position;
 
-    final closest = _closestPoseFrame(capturePosition) ?? _currentPoseFrame!;
+    final closest = _closestPoseFrame(capturePosition) ?? _currentPoseFrame;
     final copiedKeypoints = <String, Keypoint>{};
-    for (final entry in closest.keypoints.entries) {
-      final kp = entry.value;
-      copiedKeypoints[entry.key] = Keypoint(
-        label: kp.label,
-        x: kp.x,
-        y: kp.y,
-        confidence: kp.confidence,
-      );
+    if (closest != null) {
+      for (final entry in closest.keypoints.entries) {
+        final kp = entry.value;
+        copiedKeypoints[entry.key] = Keypoint(
+          label: kp.label,
+          x: kp.x,
+          y: kp.y,
+          confidence: kp.confidence,
+        );
+      }
     }
     final snapshot = PoseFrame(
       timestamp: capturePosition,
-      frameIndex: closest.frameIndex,
+      frameIndex: closest?.frameIndex ?? -1,
       keypoints: copiedKeypoints,
-      qualityScore: closest.qualityScore,
+      qualityScore: closest?.qualityScore ?? 0.0,
     );
 
     try {
