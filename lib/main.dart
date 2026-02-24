@@ -773,6 +773,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (_) => SwingQuickReviewScreen(
                         videoPath: result.videoPath,
                         swingNumber: 1,
+                        analyzeFullSwing:
+                            _analysisMode == AnalysisMode.fullSwing,
                       ),
                     ),
                   );
@@ -783,6 +785,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (_) => SwingQuickReviewScreen(
                         videoPath: fallbackPath,
                         swingNumber: 1,
+                        analyzeFullSwing:
+                            _analysisMode == AnalysisMode.fullSwing,
                       ),
                     ),
                   );
@@ -823,9 +827,14 @@ class _HomeScreenState extends State<HomeScreen> {
 class SwingQuickReviewScreen extends StatefulWidget {
   final String videoPath;
   final int swingNumber;
+  final bool analyzeFullSwing;
 
-  const SwingQuickReviewScreen(
-      {required this.videoPath, this.swingNumber = 1, super.key});
+  const SwingQuickReviewScreen({
+    required this.videoPath,
+    this.swingNumber = 1,
+    this.analyzeFullSwing = true,
+    super.key,
+  });
 
   @override
   State<SwingQuickReviewScreen> createState() => _SwingQuickReviewScreenState();
@@ -1199,6 +1208,9 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   }
 
   bool _movenetBodyPresent(List<Map<String, double>> kps) {
+    if (!widget.analyzeFullSwing) {
+      return true;
+    }
     if (kps.length < 13) return false;
     const bodyPresenceThreshold = 0.35;
 
