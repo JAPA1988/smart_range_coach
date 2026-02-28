@@ -315,8 +315,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                               color: Colors.black,
                               child: ProProjectionRasterView(
                                 poseFrame: scaledProPose,
-                                sideCropCm: _proSideCropCm,
-                                rightHalfOnly: true,
+                                sideCropCm: 0.0,
+                                rightHalfOnly: false,
                                 projectionShiftX: _proProjectionShiftX,
                                 projectionShiftCm: _proProjectionShiftCm,
                                 showGrid: true,
