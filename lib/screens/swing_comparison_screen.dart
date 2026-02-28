@@ -55,9 +55,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   static const double _metricsMinConfidence = 0.1;
   static const double _rasterHeightCm = 7.0;
   static const double _playerHeightCm = 6.0;
-  static const double _proSideCropCm = 1.0;
-  static const double _proProjectionShiftX = 0.25;
-  static const double _proProjectionShiftCm = 0.3;
 
   final List<String> _positions = [
     'address',
@@ -207,7 +204,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final userPositions = _effectiveUserPositions();
     final userPosition = userPositions[_selectedPosition];
     final proPosition = _selectedProSwing!.positions[_selectedPosition];
-    final proVideo = _selectedProSwing!.videoInfo;
 
     if (userPosition == null || proPosition == null) {
       return const Center(child: Text('Position data not available'));
@@ -224,16 +220,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               const dividerWidth = 2.0;
               final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
               final paneHeight = _cmToLogicalPx(_rasterHeightCm);
-              final aspect = proVideo.width / proVideo.height;
-              final rasterSize = _fitRasterSize(paneWidth, paneHeight, aspect);
 
               final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
               final scaledUserPose =
-                  _scalePoseToFit(
-                      userPose, targetHeightPx, rasterSize.width, rasterSize.height);
-              final scaledProPose =
-                  _scalePoseToFit(
-                      proPose, targetHeightPx, rasterSize.width, rasterSize.height);
+                  _scalePoseToFit(userPose, targetHeightPx, paneWidth, paneHeight);
 
               return SizedBox(
                 height: paneHeight,
@@ -242,51 +232,45 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                     SizedBox(
                       width: paneWidth,
                       height: paneHeight,
-                      child: Center(
-                        child: SizedBox(
-                          width: rasterSize.width,
-                          height: rasterSize.height,
-                          child: Container(
-                            color: Colors.black,
-                            child: Stack(
-                              children: [
-                                if (userPosition.skeletonImagePath != null)
-                                  Positioned.fill(
-                                    child: Image.file(
-                                      File(userPosition.skeletonImagePath!),
-                                      fit: BoxFit.contain,
-                                    ),
-                                  ),
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                      painter: _ComparisonGridPainter()),
+                      child: Container(
+                        color: Colors.black,
+                        child: Stack(
+                          children: [
+                            if (userPosition.skeletonImagePath != null)
+                              Positioned.fill(
+                                child: Image.file(
+                                  File(userPosition.skeletonImagePath!),
+                                  fit: BoxFit.contain,
                                 ),
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: PoseOverlayPainter(
-                                      scaledUserPose,
-                                      requireBodyPresence: false,
-                                      minConfidence: 0.35,
-                                    ),
-                                  ),
-                                ),
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: _UserMarkerPainter(
-                                      userPose: scaledUserPose,
-                                      proPose: scaledProPose,
-                                      showSpineMarker: _showSpineMarker,
-                                      showHipOverAnkleMarker:
-                                          _showHipOverAnkleMarker,
-                                      showShoulderOverHandMarker:
-                                          _showShoulderOverHandMarker,
-                                      showKneeFlexMarker: _showKneeFlexMarker,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
+                            Positioned.fill(
+                              child:
+                                  CustomPaint(painter: _ComparisonGridPainter()),
                             ),
-                          ),
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: PoseOverlayPainter(
+                                  scaledUserPose,
+                                  requireBodyPresence: false,
+                                  minConfidence: 0.35,
+                                ),
+                              ),
+                            ),
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _UserMarkerPainter(
+                                  userPose: scaledUserPose,
+                                  proPose: proPose,
+                                  showSpineMarker: _showSpineMarker,
+                                  showHipOverAnkleMarker:
+                                      _showHipOverAnkleMarker,
+                                  showShoulderOverHandMarker:
+                                      _showShoulderOverHandMarker,
+                                  showKneeFlexMarker: _showKneeFlexMarker,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -294,22 +278,18 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                     SizedBox(
                       width: paneWidth,
                       height: paneHeight,
-                      child: Center(
-                        child: SizedBox(
-                          width: rasterSize.width,
-                          height: rasterSize.height,
-                          child: Container(
-                            color: Colors.black,
-                            child: ProProjectionRasterView(
-                              poseFrame: scaledProPose,
-                              sideCropCm: 0.0,
-                              rightHalfOnly: false,
-                              projectionShiftX: 0.0,
-                              projectionShiftCm: 0.0,
-                              showGrid: true,
-                              showSpineAngleMarker: false,
-                              minConfidence: 0.35,
-                            ),
+                      child: ClipRect(
+                        child: Container(
+                          color: Colors.black,
+                          child: ProProjectionRasterView(
+                            poseFrame: proPose,
+                            sideCropCm: 0.0,
+                            rightHalfOnly: false,
+                            projectionShiftX: 0.0,
+                            projectionShiftCm: 0.0,
+                            showGrid: true,
+                            showSpineAngleMarker: false,
+                            minConfidence: 0.35,
                           ),
                         ),
                       ),
@@ -330,16 +310,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   double _cmToLogicalPx(double cm) {
     const logicalPixelsPerInch = 160.0;
     return (cm / 2.54) * logicalPixelsPerInch;
-  }
-
-  Size _fitRasterSize(double paneWidth, double paneHeight, double aspect) {
-    final widthByHeight = paneHeight * aspect;
-    if (widthByHeight <= paneWidth) {
-      return Size(widthByHeight, paneHeight);
-    }
-
-    final heightByWidth = paneWidth / aspect;
-    return Size(paneWidth, heightByWidth);
   }
 
   double? _angleBetween(Offset a, Offset b, Offset c) {
@@ -372,14 +342,18 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     double paneHeightPx,
   ) {
     final bounds = _poseBounds(frame);
-    final currentHeightPx = bounds.height * paneHeightPx;
-    final currentWidthPx = bounds.width * paneWidthPx;
+    final poseWidthNorm = bounds.width;
+    final poseHeightNorm = bounds.height;
 
-    if (currentHeightPx <= 0 || currentWidthPx <= 0) return frame;
+    final poseWidthPx = poseWidthNorm * paneWidthPx;
+    final poseHeightPx = poseHeightNorm * paneHeightPx;
 
-    final scaleHeight = targetHeightPx / currentHeightPx;
-    final scaleWidth = paneWidthPx / currentWidthPx;
-    final scale = math.min(scaleHeight, scaleWidth);
+    if (poseHeightPx <= 0 || poseWidthPx <= 0) return frame;
+
+    final maxWidthPx = paneWidthPx;
+    final scaleByHeight = targetHeightPx / poseHeightPx;
+    final scaleByWidth = maxWidthPx / poseWidthPx;
+    final scale = math.min(scaleByHeight, scaleByWidth);
 
     final hipL = _kp(frame, 'left_hip');
     final hipR = _kp(frame, 'right_hip');
