@@ -204,6 +204,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final userPositions = _effectiveUserPositions();
     final userPosition = userPositions[_selectedPosition];
     final proPosition = _selectedProSwing!.positions[_selectedPosition];
+    final proVideo = _selectedProSwing!.videoInfo;
 
     if (userPosition == null || proPosition == null) {
       return const Center(child: Text('Position data not available'));
@@ -218,8 +219,11 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
           LayoutBuilder(
             builder: (context, constraints) {
               const dividerWidth = 2.0;
-              final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
               final paneHeight = _cmToLogicalPx(_rasterHeightCm);
+              final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
+
+              final aspect = proVideo.width / proVideo.height;
+              final projectionWidth = paneHeight * aspect;
 
               final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
               final scaledUserPose =
@@ -278,20 +282,41 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                     SizedBox(
                       width: paneWidth,
                       height: paneHeight,
-                      child: ClipRect(
-                        child: Container(
-                          color: Colors.black,
-                          child: ProProjectionRasterView(
-                            poseFrame: proPose,
-                            sideCropCm: 0.0,
-                            rightHalfOnly: false,
-                            projectionShiftX: 0.0,
-                            projectionShiftCm: 0.0,
-                            showGrid: true,
-                            showSpineAngleMarker: false,
-                            minConfidence: 0.35,
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Text(
+                              _selectedProSwing!.golferName,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
                           ),
-                        ),
+                          Expanded(
+                            child: ClipRect(
+                              child: Align(
+                                alignment: Alignment.center,
+                                child: SizedBox(
+                                  width: projectionWidth,
+                                  height: paneHeight,
+                                  child: ProProjectionRasterView(
+                                    poseFrame: proPose,
+                                    sideCropCm: 0.0,
+                                    rightHalfOnly: false,
+                                    projectionShiftX: 0.0,
+                                    projectionShiftCm: 0.0,
+                                    showGrid: true,
+                                    showSpineAngleMarker: false,
+                                    minConfidence: 0.35,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
