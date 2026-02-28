@@ -1,0 +1,1 @@
+ c:\\Users\\Samsung\\my_flutter_app\\smart_range_coach\\.dart_tool\\flutter_build\\c53b8fbec9e9a2483721d8cfca24d7e7\\native_assets.json: 

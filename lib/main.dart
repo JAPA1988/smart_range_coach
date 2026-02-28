@@ -20,6 +20,7 @@ import 'screens/swing_comparison_screen.dart';
 import 'screens/reference_swings_screen.dart';
 import 'screens/record_swing_screen.dart';
 import 'screens/key_positions_review_screen.dart';
+import 'screens/pro_raster_screen.dart';
 // import 'services/video_frame_extractor.dart'; // FFmpeg-basiert - nicht mehr verwendet
 
 // Models
@@ -799,6 +800,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 textStyle: const TextStyle(fontSize: 18),
               ),
             ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ProRasterScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.grid_on),
+              label: const Text('Pro Raster'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(250, 60),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+            ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () {
@@ -867,6 +885,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   final Set<Issue> _selected = {};
   final Map<KeyPosition, KeyPositionSelection> _markedKeyPositions = {};
   bool _savingKeyPositions = false;
+  bool _openingComparison = false;
   VoidCallback? _ctrlListener;
   final GlobalKey _videoRepaintKey = GlobalKey();
 
@@ -1824,15 +1843,28 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   }
 
   Future<void> _openComparisonScreen() async {
-    try {
-      final analysisService = VideoAnalysisService();
-      user_model.UserSwing userSwing;
+    if (_openingComparison) return;
+    setState(() => _openingComparison = true);
 
-      if (widget.analyzeFullSwing) {
+    try {
+      final markedPositions = await _buildMarkedPositionsForComparison();
+      final fileName = widget.videoPath.split(Platform.pathSeparator).last;
+      final id = fileName.replaceAll('.mp4', '');
+
+      user_model.UserSwing userSwing;
+      if (markedPositions != null && markedPositions.isNotEmpty) {
+        userSwing = user_model.UserSwing(
+          id: id,
+          videoPath: widget.videoPath,
+          recordedAt: DateTime.now(),
+          frames: const [],
+          status: user_model.AnalysisStatus.completed,
+          markedPositions: markedPositions,
+        );
+      } else if (widget.analyzeFullSwing) {
+        final analysisService = VideoAnalysisService();
         userSwing = await analysisService.analyzeVideo(widget.videoPath);
       } else {
-        final fileName = widget.videoPath.split(Platform.pathSeparator).last;
-        final id = fileName.replaceAll('.mp4', '');
         userSwing = user_model.UserSwing(
           id: id,
           videoPath: widget.videoPath,
@@ -1840,11 +1872,6 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
           frames: const [],
           status: user_model.AnalysisStatus.completed,
         );
-      }
-
-      final markedPositions = await _buildMarkedPositionsForComparison();
-      if (markedPositions != null && markedPositions.isNotEmpty) {
-        userSwing = userSwing.copyWith(markedPositions: markedPositions);
       }
 
       if (!mounted) return;
@@ -1862,6 +1889,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
           content: Text('Vergleich konnte nicht geöffnet werden: $e'),
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _openingComparison = false);
+      }
     }
   }
 
@@ -3493,11 +3524,13 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
                                 SizedBox(
                                   width: double.infinity,
                                   child: ElevatedButton.icon(
-                                    onPressed: _savingKeyPositions
+                                    onPressed: _savingKeyPositions || _openingComparison
                                         ? null
                                         : _openComparisonScreen,
                                     icon: const Icon(Icons.compare_arrows),
-                                    label: const Text('Vergleich öffnen'),
+                                    label: _openingComparison
+                                        ? const Text('Öffne Vergleich...')
+                                        : const Text('Vergleich öffnen'),
                                   ),
                                 ),
                               ],

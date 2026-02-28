@@ -8,6 +8,7 @@ import '../models/pose_frame.dart' as pose;
 import '../models/reference_swing.dart' as ref;
 import '../models/user_swing.dart' as user;
 import '../services/reference_swing_service.dart';
+import '../widgets/pro_projection_raster_view.dart';
 import '../widgets/pose_overlay_painter.dart';
 
 class _ComparisonGridPainter extends CustomPainter {
@@ -51,11 +52,11 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   bool _showShoulderOverHandMarker = false;
   bool _showKneeFlexMarker = false;
 
-  static const double _minScale = 0.7;
-  static const double _maxScale = 2.2;
   static const double _metricsMinConfidence = 0.1;
-  static const double _userHeightCm = 175.0;
-  static const double _proHeightCm = 183.0;
+  static const double _rasterHeightCm = 6.0;
+  static const double _proSideCropCm = 1.0;
+  static const double _proProjectionShiftX = 0.25;
+  static const double _proProjectionShiftCm = 0.3;
 
   final List<String> _positions = [
     'address',
@@ -213,18 +214,12 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
     final userPose = _userToPoseFrame(userPosition);
     final proPose = _proToPoseFrame(proPosition);
-    final scaledProPose = _scalePoseToMatch(
-      proPose,
-      userPose,
-      sourceHeightCm: _proHeightCm,
-      targetHeightCm: _userHeightCm,
-    );
 
     return SingleChildScrollView(
       child: Column(
         children: [
           SizedBox(
-            height: _cmToLogicalPx(7.0),
+            height: _cmToLogicalPx(_rasterHeightCm),
             child: Row(
             children: [
               // User
@@ -263,7 +258,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                                   painter: PoseOverlayPainter(
                                     userPose,
                                     requireBodyPresence: false,
-                                    minConfidence: 0.1,
+                                    minConfidence: 0.35,
                                   ),
                                 ),
                               ),
@@ -311,21 +306,15 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                         child: _buildRasterFrame(
                           width: proVideo.width.toDouble(),
                           height: proVideo.height.toDouble(),
-                          child: Stack(
-                            children: [
-                              Positioned.fill(
-                                child:
-                                    CustomPaint(painter: _ComparisonGridPainter()),
-                              ),
-                              Positioned.fill(
-                                child: CustomPaint(
-                                  painter: PoseOverlayPainter(
-                                    scaledProPose,
-                                    requireBodyPresence: false,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          child: ProProjectionRasterView(
+                            poseFrame: proPose,
+                            sideCropCm: _proSideCropCm,
+                            rightHalfOnly: true,
+                            projectionShiftX: _proProjectionShiftX,
+                            projectionShiftCm: _proProjectionShiftCm,
+                            showGrid: true,
+                            showSpineAngleMarker: false,
+                            minConfidence: 0.35,
                           ),
                         ),
                       ),
@@ -723,79 +712,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     return Rect.fromLTRB(minX!, minY!, maxX!, maxY!);
   }
 
-  pose.PoseFrame _scalePoseToMatch(
-    pose.PoseFrame source,
-    pose.PoseFrame target,
-    {
-    required double sourceHeightCm,
-    required double targetHeightCm,
-  }
-  ) {
-    final src = _poseBounds(source);
-    final tgt = _poseBounds(target);
-
-    final safeSrcWidth = math.max(src.width, 0.001);
-    final safeSrcHeight = math.max(src.height, 0.001);
-
-    var scaleX = (tgt.width / safeSrcWidth);
-    var scaleY = (tgt.height / safeSrcHeight);
-
-    final srcPoseHeight = math.max(_poseHeight(source), 0.001);
-    final tgtPoseHeight = math.max(_poseHeight(target), 0.001);
-
-    final srcPxPerCm = srcPoseHeight / sourceHeightCm;
-    final tgtPxPerCm = tgtPoseHeight / targetHeightCm;
-
-    final heightScale = (tgtPxPerCm / srcPxPerCm);
-    scaleX *= heightScale;
-    scaleY *= heightScale;
-
-    scaleX = scaleX.clamp(_minScale, _maxScale);
-    scaleY = scaleY.clamp(_minScale, _maxScale);
-
-    final srcCx = src.left + src.width / 2;
-    final srcCy = src.top + src.height / 2;
-    final tgtCx = tgt.left + tgt.width / 2;
-    final tgtCy = tgt.top + tgt.height / 2;
-
-    final scaled = <String, pose.Keypoint>{};
-    for (final entry in source.keypoints.entries) {
-      final kp = entry.value;
-      final x = ((kp.x - srcCx) * scaleX + tgtCx).clamp(0.0, 1.0);
-      final y = ((kp.y - srcCy) * scaleY + tgtCy).clamp(0.0, 1.0);
-
-      scaled[entry.key] = pose.Keypoint(
-        label: kp.label,
-        x: x,
-        y: y,
-        confidence: kp.confidence,
-      );
-    }
-
-    return pose.PoseFrame(
-      timestamp: source.timestamp,
-      frameIndex: source.frameIndex,
-      keypoints: scaled,
-      qualityScore: source.qualityScore,
-    );
-  }
-
-  double _poseHeight(pose.PoseFrame frame) {
-    final shL = _kp(frame, 'left_shoulder');
-    final shR = _kp(frame, 'right_shoulder');
-    final anL = _kp(frame, 'left_ankle');
-    final anR = _kp(frame, 'right_ankle');
-
-    if (shL != null && shR != null && anL != null && anR != null) {
-      final shoulderMid = Offset((shL.dx + shR.dx) / 2, (shL.dy + shR.dy) / 2);
-      final ankleMid = Offset((anL.dx + anR.dx) / 2, (anL.dy + anR.dy) / 2);
-      return (ankleMid - shoulderMid).distance;
-    }
-
-    final bounds = _poseBounds(frame);
-    return bounds.height;
-  }
-
   pose.PoseFrame _normalizePose(pose.PoseFrame frame) {
     final shL = _kp(frame, 'left_shoulder');
     final shR = _kp(frame, 'right_shoulder');
@@ -905,24 +821,27 @@ class _UserMarkerPainter extends CustomPainter {
       return Offset(k.x * size.width, k.y * size.height);
     }
 
+    Offset? kpNorm(String label, pose.PoseFrame f) {
+      final k = f.getKeypoint(label);
+      if (k == null || k.confidence < 0.1) return null;
+      return Offset(k.x, k.y);
+    }
+
     if (showSpineMarker) {
-      final hipL = kp('left_hip', userPose);
-      final hipR = kp('right_hip', userPose);
-      final shL = kp('left_shoulder', proPose);
-      final shR = kp('right_shoulder', proPose);
-      final hipLPro = kp('left_hip', proPose);
-      final hipRPro = kp('right_hip', proPose);
+      final hipL = kpNorm('left_hip', proPose);
+      final hipR = kpNorm('right_hip', proPose);
+      final shL = kpNorm('left_shoulder', proPose);
+      final shR = kpNorm('right_shoulder', proPose);
+      final userHipL = kp('left_hip', userPose);
+      final userHipR = kp('right_hip', userPose);
 
       if (hipL != null &&
           hipR != null &&
           shL != null &&
           shR != null &&
-          hipLPro != null &&
-          hipRPro != null) {
-        final hipMid = Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2);
-
-        final proHipMid =
-            Offset((hipLPro.dx + hipRPro.dx) / 2, (hipLPro.dy + hipRPro.dy) / 2);
+          userHipL != null &&
+          userHipR != null) {
+        final proHipMid = Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2);
         final proShoulderMid =
             Offset((shL.dx + shR.dx) / 2, (shL.dy + shR.dy) / 2);
 
@@ -933,12 +852,16 @@ class _UserMarkerPainter extends CustomPainter {
         final angle = math.atan2(dx, dy);
         final proSpineAngleDeg = angle.abs() * 180 / math.pi;
 
+        final userHipMid =
+            Offset((userHipL.dx + userHipR.dx) / 2, (userHipL.dy + userHipR.dy) / 2);
+
         final length = size.height * 0.6;
         final end = Offset(
-          hipMid.dx + length * math.sin(angle),
-          hipMid.dy - length * math.cos(angle),
+          userHipMid.dx + length * math.sin(angle),
+          userHipMid.dy - length * math.cos(angle),
         );
-        canvas.drawLine(hipMid, end, paint);
+
+        canvas.drawLine(userHipMid, end, paint);
 
         final textPainter = TextPainter(
           text: TextSpan(
