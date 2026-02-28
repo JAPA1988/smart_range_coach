@@ -219,13 +219,12 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
             builder: (context, constraints) {
               const dividerWidth = 2.0;
               final paneHeight = _cmToLogicalPx(_rasterHeightCm);
-              final aspect = proVideo.width / proVideo.height;
-              final paneWidth = paneHeight * aspect;
+              final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
               final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
               final scaledUserPose =
-                _scalePoseToHeight(userPose, targetHeightPx, paneHeight);
+                  _scalePoseToFit(userPose, targetHeightPx, paneWidth, paneHeight);
               final scaledProPose =
-                _scalePoseToHeight(proPose, targetHeightPx, paneHeight);
+                  _scalePoseToFit(proPose, targetHeightPx, paneWidth, paneHeight);
 
               return SizedBox(
                 height: paneHeight,
@@ -247,47 +246,43 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           Expanded(
                             child: Container(
                               color: Colors.black,
-                              child: _buildRasterFrame(
-                                width: proVideo.width.toDouble(),
-                                height: proVideo.height.toDouble(),
-                                child: Stack(
-                                  children: [
-                                    if (userPosition.skeletonImagePath != null)
-                                      Positioned.fill(
-                                        child: Image.file(
-                                          File(userPosition.skeletonImagePath!),
-                                          fit: BoxFit.contain,
-                                        ),
-                                      ),
+                              child: Stack(
+                                children: [
+                                  if (userPosition.skeletonImagePath != null)
                                     Positioned.fill(
-                                      child: CustomPaint(
-                                          painter: _ComparisonGridPainter()),
-                                    ),
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                        painter: PoseOverlayPainter(
-                                          scaledUserPose,
-                                          requireBodyPresence: false,
-                                          minConfidence: 0.35,
-                                        ),
+                                      child: Image.file(
+                                        File(userPosition.skeletonImagePath!),
+                                        fit: BoxFit.contain,
                                       ),
                                     ),
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                        painter: _UserMarkerPainter(
-                                          userPose: scaledUserPose,
-                                          proPose: scaledProPose,
-                                          showSpineMarker: _showSpineMarker,
-                                          showHipOverAnkleMarker:
-                                              _showHipOverAnkleMarker,
-                                          showShoulderOverHandMarker:
-                                              _showShoulderOverHandMarker,
-                                          showKneeFlexMarker: _showKneeFlexMarker,
-                                        ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                        painter: _ComparisonGridPainter()),
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: PoseOverlayPainter(
+                                        scaledUserPose,
+                                        requireBodyPresence: false,
+                                        minConfidence: 0.35,
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _UserMarkerPainter(
+                                        userPose: scaledUserPose,
+                                        proPose: scaledProPose,
+                                        showSpineMarker: _showSpineMarker,
+                                        showHipOverAnkleMarker:
+                                            _showHipOverAnkleMarker,
+                                        showShoulderOverHandMarker:
+                                            _showShoulderOverHandMarker,
+                                        showKneeFlexMarker: _showKneeFlexMarker,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -314,27 +309,23 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           Expanded(
                             child: Container(
                               color: Colors.black,
-                              child: _buildRasterFrame(
-                                width: proVideo.width.toDouble(),
-                                height: proVideo.height.toDouble(),
-                                child: Stack(
-                                  children: [
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                        painter: _ComparisonGridPainter(),
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _ComparisonGridPainter(),
+                                    ),
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: PoseOverlayPainter(
+                                        scaledProPose,
+                                        requireBodyPresence: false,
+                                        minConfidence: 0.35,
                                       ),
                                     ),
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                        painter: PoseOverlayPainter(
-                                          scaledProPose,
-                                          requireBodyPresence: false,
-                                          minConfidence: 0.35,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -382,19 +373,33 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     return Offset(kp.x, kp.y);
   }
 
-  pose.PoseFrame _scalePoseToHeight(
+  pose.PoseFrame _scalePoseToFit(
     pose.PoseFrame frame,
     double targetHeightPx,
-    double currentHeightPx,
+    double paneWidthPx,
+    double paneHeightPx,
   ) {
-    if (currentHeightPx <= 0) return frame;
-    final scale = (targetHeightPx / currentHeightPx).clamp(0.1, 10.0);
+    final bounds = _poseBounds(frame);
+    final currentHeightPx = bounds.height * paneHeightPx;
+    final currentWidthPx = bounds.width * paneWidthPx;
+
+    if (currentHeightPx <= 0 || currentWidthPx <= 0) return frame;
+
+    final scaleHeight = targetHeightPx / currentHeightPx;
+    final scaleWidth = paneWidthPx / currentWidthPx;
+    final scale = math.min(scaleHeight, scaleWidth);
+
+    final hipL = _kp(frame, 'left_hip');
+    final hipR = _kp(frame, 'right_hip');
+    final center = (hipL != null && hipR != null)
+        ? Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2)
+        : bounds.center;
 
     final scaled = <String, pose.Keypoint>{};
     for (final entry in frame.keypoints.entries) {
       final kp = entry.value;
-      final x = ((kp.x - 0.5) * scale + 0.5).clamp(0.0, 1.0);
-      final y = ((kp.y - 0.5) * scale + 0.5).clamp(0.0, 1.0);
+      final x = ((kp.x - center.dx) * scale + center.dx).clamp(0.0, 1.0);
+      final y = ((kp.y - center.dy) * scale + center.dy).clamp(0.0, 1.0);
       scaled[entry.key] = pose.Keypoint(
         label: kp.label,
         x: x,
