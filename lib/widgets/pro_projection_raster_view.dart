@@ -86,6 +86,7 @@ class ProProjectionRasterView extends StatelessWidget {
         );
 
         if (rightHalfOnly) {
+          final baseContent = content;
           content = LayoutBuilder(
             builder: (context, halfConstraints) {
               return ClipRect(
@@ -94,7 +95,7 @@ class ProProjectionRasterView extends StatelessWidget {
                   widthFactor: 0.5,
                   child: Transform.translate(
                     offset: Offset(-halfConstraints.maxWidth / 2, 0),
-                    child: content,
+                    child: baseContent,
                   ),
                 ),
               );

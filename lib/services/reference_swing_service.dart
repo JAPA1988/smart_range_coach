@@ -34,6 +34,19 @@ class ReferenceSwingService {
     );
   }
 
+  Future<ReferenceSwing> loadSwingMinimal(String swingId) async {
+    final basePath = 'assets/reference_swings/$swingId';
+
+    final metadataJson = await _loadJson('$basePath/metadata.json');
+    final keyPositionsJson = await _loadJson('$basePath/key_positions.json');
+
+    return ReferenceSwing.fromJson(
+      metadataJson,
+      keyPositionsJson,
+      const {},
+    );
+  }
+
   Future<Map<String, dynamic>> _loadJson(String path) async {
     final jsonString = await rootBundle.loadString(path);
     return json.decode(jsonString) as Map<String, dynamic>;

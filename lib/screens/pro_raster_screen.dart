@@ -15,9 +15,9 @@ class ProRasterScreen extends StatefulWidget {
 }
 
 class _ProRasterScreenState extends State<ProRasterScreen> {
-  static const double _sideCropCm = 1.0;
-  static const double _projectionShiftX = 0.25;
-  static const double _projectionShiftCm = 0.3;
+  static const double _sideCropCm = 0.0;
+  static const double _projectionShiftX = 0.0;
+  static const double _projectionShiftCm = 0.0;
 
   final _service = ReferenceSwingService();
   ref.ReferenceSwing? _swing;
@@ -34,22 +34,13 @@ class _ProRasterScreenState extends State<ProRasterScreen> {
 
   Future<void> _loadFirstPro() async {
     try {
-      final swings = await _service.loadAllSwings();
+      final swings = await _service.loadSwingMinimal('swing_1_andy_7iron');
       if (!mounted) return;
 
-      if (swings.isEmpty) {
-        setState(() {
-          _error = 'No pro swings available';
-          _loading = false;
-        });
-        return;
-      }
-
-      final first = swings.first;
       setState(() {
-        _swing = first;
-        _selectedPosition = first.keyPositions.isNotEmpty
-            ? first.keyPositions.first
+        _swing = swings;
+        _selectedPosition = swings.keyPositions.isNotEmpty
+            ? swings.keyPositions.first
             : null;
         _loading = false;
       });
@@ -151,7 +142,7 @@ class _ProRasterScreenState extends State<ProRasterScreen> {
                 child: ProProjectionRasterView(
                   poseFrame: poseFrame,
                   sideCropCm: _sideCropCm,
-                  rightHalfOnly: true,
+                  rightHalfOnly: false,
                   projectionShiftX: _projectionShiftX,
                   projectionShiftCm: _projectionShiftCm,
                   showGrid: true,
