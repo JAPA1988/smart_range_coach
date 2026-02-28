@@ -8,7 +8,6 @@ import '../models/pose_frame.dart' as pose;
 import '../models/reference_swing.dart' as ref;
 import '../models/user_swing.dart' as user;
 import '../services/reference_swing_service.dart';
-import '../widgets/pro_projection_raster_view.dart';
 import '../widgets/pose_overlay_painter.dart';
 
 class _ComparisonGridPainter extends CustomPainter {
@@ -53,10 +52,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   bool _showKneeFlexMarker = false;
 
   static const double _metricsMinConfidence = 0.1;
-  static const double _rasterHeightCm = 6.0;
-  static const double _proSideCropCm = 1.0;
-  static const double _proProjectionShiftX = 0.25;
-  static const double _proProjectionShiftCm = 0.3;
+  static const double _rasterHeightCm = 7.0;
+  static const double _playerHeightCm = 6.0;
 
   final List<String> _positions = [
     'address',
@@ -218,112 +215,136 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     return SingleChildScrollView(
       child: Column(
         children: [
-          SizedBox(
-            height: _cmToLogicalPx(_rasterHeightCm),
-            child: Row(
-            children: [
-              // User
-              Expanded(
-                child: Column(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const dividerWidth = 2.0;
+              final paneHeight = _cmToLogicalPx(_rasterHeightCm);
+              final aspect = proVideo.width / proVideo.height;
+              final paneWidth = paneHeight * aspect;
+              final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
+              final scaledUserPose =
+                _scalePoseToHeight(userPose, targetHeightPx, paneHeight);
+              final scaledProPose =
+                _scalePoseToHeight(proPose, targetHeightPx, paneHeight);
+
+              return SizedBox(
+                height: paneHeight,
+                child: Row(
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Text(
-                        'Your Swing',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
+                    SizedBox(
+                      width: paneWidth,
+                      height: paneHeight,
+                      child: Column(
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Text(
+                              'Your Swing',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Expanded(
+                            child: Container(
+                              color: Colors.black,
+                              child: _buildRasterFrame(
+                                width: proVideo.width.toDouble(),
+                                height: proVideo.height.toDouble(),
+                                child: Stack(
+                                  children: [
+                                    if (userPosition.skeletonImagePath != null)
+                                      Positioned.fill(
+                                        child: Image.file(
+                                          File(userPosition.skeletonImagePath!),
+                                          fit: BoxFit.contain,
+                                        ),
+                                      ),
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                          painter: _ComparisonGridPainter()),
+                                    ),
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: PoseOverlayPainter(
+                                          scaledUserPose,
+                                          requireBodyPresence: false,
+                                          minConfidence: 0.35,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _UserMarkerPainter(
+                                          userPose: scaledUserPose,
+                                          proPose: scaledProPose,
+                                          showSpineMarker: _showSpineMarker,
+                                          showHipOverAnkleMarker:
+                                              _showHipOverAnkleMarker,
+                                          showShoulderOverHandMarker:
+                                              _showShoulderOverHandMarker,
+                                          showKneeFlexMarker: _showKneeFlexMarker,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    Expanded(
-                      child: Container(
-                        color: Colors.black,
-                        child: _buildRasterFrame(
-                          width: proVideo.width.toDouble(),
-                          height: proVideo.height.toDouble(),
-                          child: Stack(
-                            children: [
-                              if (userPosition.skeletonImagePath != null)
-                                Positioned.fill(
-                                  child: Image.file(
-                                    File(userPosition.skeletonImagePath!),
-                                    fit: BoxFit.contain,
-                                  ),
-                                ),
-                              Positioned.fill(
-                                child: CustomPaint(
-                                    painter: _ComparisonGridPainter()),
+                    Container(width: dividerWidth, color: Colors.grey[400]),
+                    SizedBox(
+                      width: paneWidth,
+                      height: paneHeight,
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Text(
+                              _selectedProSwing!.golferName,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
                               ),
-                              Positioned.fill(
-                                child: CustomPaint(
-                                  painter: PoseOverlayPainter(
-                                    userPose,
-                                    requireBodyPresence: false,
-                                    minConfidence: 0.35,
-                                  ),
-                                ),
-                              ),
-                              Positioned.fill(
-                                child: CustomPaint(
-                                  painter: _UserMarkerPainter(
-                                    userPose: userPose,
-                                    proPose: proPose,
-                                    showSpineMarker: _showSpineMarker,
-                                    showHipOverAnkleMarker:
-                                        _showHipOverAnkleMarker,
-                                    showShoulderOverHandMarker:
-                                        _showShoulderOverHandMarker,
-                                    showKneeFlexMarker: _showKneeFlexMarker,
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
+                          Expanded(
+                            child: Container(
+                              color: Colors.black,
+                              child: _buildRasterFrame(
+                                width: proVideo.width.toDouble(),
+                                height: proVideo.height.toDouble(),
+                                child: Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _ComparisonGridPainter(),
+                                      ),
+                                    ),
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: PoseOverlayPainter(
+                                          scaledProPose,
+                                          requireBodyPresence: false,
+                                          minConfidence: 0.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-              Container(width: 2, color: Colors.grey[400]),
-              // Pro
-              Expanded(
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(
-                        _selectedProSwing!.golferName,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Container(
-                        color: Colors.black,
-                        child: _buildRasterFrame(
-                          width: proVideo.width.toDouble(),
-                          height: proVideo.height.toDouble(),
-                          child: ProProjectionRasterView(
-                            poseFrame: proPose,
-                            sideCropCm: _proSideCropCm,
-                            rightHalfOnly: true,
-                            projectionShiftX: _proProjectionShiftX,
-                            projectionShiftCm: _proProjectionShiftCm,
-                            showGrid: true,
-                            showSpineAngleMarker: false,
-                            minConfidence: 0.35,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+              );
+            },
           ),
           if (_selectedPosition == 'address')
             _buildMetricsTable(userPose, proPose),
@@ -359,6 +380,35 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final kp = frame.getKeypoint(label);
     if (kp == null || !kp.isVisible) return null;
     return Offset(kp.x, kp.y);
+  }
+
+  pose.PoseFrame _scalePoseToHeight(
+    pose.PoseFrame frame,
+    double targetHeightPx,
+    double currentHeightPx,
+  ) {
+    if (currentHeightPx <= 0) return frame;
+    final scale = (targetHeightPx / currentHeightPx).clamp(0.1, 10.0);
+
+    final scaled = <String, pose.Keypoint>{};
+    for (final entry in frame.keypoints.entries) {
+      final kp = entry.value;
+      final x = ((kp.x - 0.5) * scale + 0.5).clamp(0.0, 1.0);
+      final y = ((kp.y - 0.5) * scale + 0.5).clamp(0.0, 1.0);
+      scaled[entry.key] = pose.Keypoint(
+        label: kp.label,
+        x: x,
+        y: y,
+        confidence: kp.confidence,
+      );
+    }
+
+    return pose.PoseFrame(
+      timestamp: frame.timestamp,
+      frameIndex: frame.frameIndex,
+      keypoints: scaled,
+      qualityScore: frame.qualityScore,
+    );
   }
 
   Offset? _kpForMetrics(pose.PoseFrame frame, String label) {
