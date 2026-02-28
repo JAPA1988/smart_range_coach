@@ -125,6 +125,7 @@ class _ProRasterScreenState extends State<ProRasterScreen> {
 
     final poseFrame = _toPoseFrame(pos);
     final videoInfo = _swing!.videoInfo;
+    debugPrint('ProRaster video: ${videoInfo.width} x ${videoInfo.height}');
     final spineAngle = _spineAngle(poseFrame);
 
     return Scaffold(

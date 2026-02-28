@@ -205,6 +205,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final userPosition = userPositions[_selectedPosition];
     final proPosition = _selectedProSwing!.positions[_selectedPosition];
     final proVideo = _selectedProSwing!.videoInfo;
+    debugPrint('Pro video: ${proVideo.width} x ${proVideo.height}');
 
     if (userPosition == null || proPosition == null) {
       return const Center(child: Text('Position data not available'));
@@ -223,11 +224,15 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
 
               final aspect = proVideo.width / proVideo.height;
-              final projectionWidth = paneHeight * aspect;
+              final projectionWidth = paneWidth;
 
               final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
               final scaledUserPose =
                   _scalePoseToFit(userPose, targetHeightPx, paneWidth, paneHeight);
+                final proTargetHeightPx = paneHeight;
+                final scaledProPose =
+                  _scalePoseToFit(
+                    proPose, proTargetHeightPx, paneWidth, paneHeight);
 
               return SizedBox(
                 height: paneHeight,
@@ -282,41 +287,24 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                     SizedBox(
                       width: paneWidth,
                       height: paneHeight,
-                      child: Column(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: Text(
-                              _selectedProSwing!.golferName,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue,
-                              ),
+                      child: ClipRect(
+                        child: Align(
+                          alignment: Alignment.center,
+                          child: SizedBox(
+                            width: projectionWidth,
+                            height: paneHeight,
+                            child: ProProjectionRasterView(
+                              poseFrame: scaledProPose,
+                              sideCropCm: 0.0,
+                              rightHalfOnly: false,
+                              projectionShiftX: 0.0,
+                              projectionShiftCm: 0.0,
+                              showGrid: true,
+                              showSpineAngleMarker: false,
+                              minConfidence: 0.35,
                             ),
                           ),
-                          Expanded(
-                            child: ClipRect(
-                              child: Align(
-                                alignment: Alignment.center,
-                                child: SizedBox(
-                                  width: projectionWidth,
-                                  height: paneHeight,
-                                  child: ProProjectionRasterView(
-                                    poseFrame: proPose,
-                                    sideCropCm: 0.0,
-                                    rightHalfOnly: false,
-                                    projectionShiftX: 0.0,
-                                    projectionShiftCm: 0.0,
-                                    showGrid: true,
-                                    showSpineAngleMarker: false,
-                                    minConfidence: 0.35,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ],
