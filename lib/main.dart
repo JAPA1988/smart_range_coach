@@ -1846,25 +1846,27 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
     if (_openingComparison) return;
     setState(() => _openingComparison = true);
 
+    final nav = Navigator.of(context);
     try {
-      final markedPositions = await _buildMarkedPositionsForComparison();
-      final fileName = widget.videoPath.split(Platform.pathSeparator).last;
-      final id = fileName.replaceAll('.mp4', '');
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
 
+      final analysisService = VideoAnalysisService();
       user_model.UserSwing userSwing;
-      if (markedPositions != null && markedPositions.isNotEmpty) {
-        userSwing = user_model.UserSwing(
-          id: id,
-          videoPath: widget.videoPath,
-          recordedAt: DateTime.now(),
-          frames: const [],
-          status: user_model.AnalysisStatus.completed,
-          markedPositions: markedPositions,
+
+      if (widget.analyzeFullSwing) {
+        userSwing = await analysisService.analyzeVideo(
+          widget.videoPath,
+          context: context,
+          showProgressDialog: true,
+          timeout: const Duration(minutes: 5),
         );
-      } else if (widget.analyzeFullSwing) {
-        final analysisService = VideoAnalysisService();
-        userSwing = await analysisService.analyzeVideo(widget.videoPath);
       } else {
+        final fileName = widget.videoPath.split(Platform.pathSeparator).last;
+        final id = fileName.replaceAll('.mp4', '');
         userSwing = user_model.UserSwing(
           id: id,
           videoPath: widget.videoPath,
@@ -1874,8 +1876,15 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         );
       }
 
+      final markedPositions = await _buildMarkedPositionsForComparison();
+      if (markedPositions != null && markedPositions.isNotEmpty) {
+        userSwing = userSwing.copyWith(markedPositions: markedPositions);
+      }
+
       if (!mounted) return;
-      Navigator.of(context).push(
+      nav.pop();
+
+      nav.push(
         MaterialPageRoute(
           builder: (_) => SwingComparisonScreen(
             userSwing: userSwing,
@@ -1883,16 +1892,14 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         ),
       );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Vergleich konnte nicht geöffnet werden: $e'),
-        ),
-      );
-    } finally {
       if (mounted) {
-        setState(() => _openingComparison = false);
+        nav.pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Vergleich konnte nicht geöffnet werden: $e')),
+        );
       }
+    } finally {
+      if (mounted) setState(() => _openingComparison = false);
     }
   }
 
