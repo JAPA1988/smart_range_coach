@@ -8,6 +8,7 @@ import '../models/pose_frame.dart' as pose;
 import '../models/reference_swing.dart' as ref;
 import '../models/user_swing.dart' as user;
 import '../services/reference_swing_service.dart';
+import '../widgets/pro_projection_raster_view.dart';
 import '../widgets/pose_overlay_painter.dart';
 
 class _ComparisonGridPainter extends CustomPainter {
@@ -54,6 +55,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   static const double _metricsMinConfidence = 0.1;
   static const double _rasterHeightCm = 7.0;
   static const double _playerHeightCm = 6.0;
+  static const double _proSideCropCm = 1.0;
+  static const double _proProjectionShiftX = 0.25;
+  static const double _proProjectionShiftCm = 0.3;
 
   final List<String> _positions = [
     'address',
@@ -309,23 +313,15 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           Expanded(
                             child: Container(
                               color: Colors.black,
-                              child: Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _ComparisonGridPainter(),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: PoseOverlayPainter(
-                                        scaledProPose,
-                                        requireBodyPresence: false,
-                                        minConfidence: 0.35,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                              child: ProProjectionRasterView(
+                                poseFrame: scaledProPose,
+                                sideCropCm: _proSideCropCm,
+                                rightHalfOnly: true,
+                                projectionShiftX: _proProjectionShiftX,
+                                projectionShiftCm: _proProjectionShiftCm,
+                                showGrid: true,
+                                showSpineAngleMarker: false,
+                                minConfidence: 0.35,
                               ),
                             ),
                           ),
