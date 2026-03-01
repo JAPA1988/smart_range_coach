@@ -54,7 +54,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
   static const double _metricsMinConfidence = 0.1;
   static const double _rasterHeightCm = 7.0;
-  static const double _playerHeightCm = 5.0;
 
   final List<String> _positions = [
     'address',
@@ -226,9 +225,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final aspect = proVideo.width / proVideo.height;
               final projectionWidth = paneHeight * aspect;
               final projectionOffsetX = (paneWidth - projectionWidth) / 2;
-                final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
-                final scaledUserPose =
-                  _scalePoseToFit(userPose, targetHeightPx, paneWidth, paneHeight);
 
               return SizedBox(
                 height: paneHeight,
@@ -255,7 +251,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                             Positioned.fill(
                               child: CustomPaint(
                                 painter: PoseOverlayPainter(
-                                  scaledUserPose,
+                                  userPose,
                                   requireBodyPresence: false,
                                   minConfidence: 0.35,
                                 ),
@@ -264,7 +260,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                             Positioned.fill(
                               child: CustomPaint(
                                 painter: _UserMarkerPainter(
-                                  userPose: scaledUserPose,
+                                  userPose: userPose,
                                   proPose: proPose,
                                   showSpineMarker: _showSpineMarker,
                                   showHipOverAnkleMarker:
@@ -348,53 +344,6 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final kp = frame.getKeypoint(label);
     if (kp == null || !kp.isVisible) return null;
     return Offset(kp.x, kp.y);
-  }
-
-  pose.PoseFrame _scalePoseToFit(
-    pose.PoseFrame frame,
-    double targetHeightPx,
-    double paneWidthPx,
-    double paneHeightPx,
-  ) {
-    final bounds = _poseBounds(frame);
-    final poseWidthNorm = bounds.width;
-    final poseHeightNorm = bounds.height;
-
-    final poseWidthPx = poseWidthNorm * paneWidthPx;
-    final poseHeightPx = poseHeightNorm * paneHeightPx;
-
-    if (poseHeightPx <= 0 || poseWidthPx <= 0) return frame;
-
-    final maxWidthPx = paneWidthPx;
-    final scaleByHeight = targetHeightPx / poseHeightPx;
-    final scaleByWidth = maxWidthPx / poseWidthPx;
-    final scale = math.min(scaleByHeight, scaleByWidth);
-
-    final hipL = _kp(frame, 'left_hip');
-    final hipR = _kp(frame, 'right_hip');
-    final center = (hipL != null && hipR != null)
-        ? Offset((hipL.dx + hipR.dx) / 2, (hipL.dy + hipR.dy) / 2)
-        : bounds.center;
-
-    final scaled = <String, pose.Keypoint>{};
-    for (final entry in frame.keypoints.entries) {
-      final kp = entry.value;
-      final x = ((kp.x - center.dx) * scale + center.dx).clamp(0.0, 1.0);
-      final y = ((kp.y - center.dy) * scale + center.dy).clamp(0.0, 1.0);
-      scaled[entry.key] = pose.Keypoint(
-        label: kp.label,
-        x: x,
-        y: y,
-        confidence: kp.confidence,
-      );
-    }
-
-    return pose.PoseFrame(
-      timestamp: frame.timestamp,
-      frameIndex: frame.frameIndex,
-      keypoints: scaled,
-      qualityScore: frame.qualityScore,
-    );
   }
 
   Offset? _kpForMetrics(pose.PoseFrame frame, String label) {
