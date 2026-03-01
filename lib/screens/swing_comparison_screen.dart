@@ -243,8 +243,11 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final paneHeight = _cmToLogicalPx(_rasterHeightCm);
               final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
 
-              final aspect = proVideo.width / proVideo.height;
-              final fullProjectionWidth = paneHeight * aspect;
+              final proAspect = proVideo.width / proVideo.height;
+              final userAspect = _userVideoAspect ?? proAspect;
+
+              final proProjectionWidth = paneHeight * proAspect;
+              final userProjectionWidth = paneHeight * userAspect;
 
               return SizedBox(
                 height: paneHeight,
@@ -255,11 +258,11 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       height: paneHeight,
                       child: ClipRect(
                         child: OverflowBox(
-                          maxWidth: fullProjectionWidth,
+                          maxWidth: userProjectionWidth,
                           maxHeight: paneHeight,
                           alignment: Alignment.center,
                           child: SizedBox(
-                            width: fullProjectionWidth,
+                            width: userProjectionWidth,
                             height: paneHeight,
                             child: ProProjectionRasterView(
                               poseFrame: userPose,
@@ -281,11 +284,11 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       height: paneHeight,
                       child: ClipRect(
                         child: OverflowBox(
-                          maxWidth: fullProjectionWidth,
+                          maxWidth: proProjectionWidth,
                           maxHeight: paneHeight,
                           alignment: Alignment.center,
                           child: SizedBox(
-                            width: fullProjectionWidth,
+                            width: proProjectionWidth,
                             height: paneHeight,
                             child: ProProjectionRasterView(
                               poseFrame: proPose,
