@@ -54,7 +54,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
   static const double _metricsMinConfidence = 0.1;
   static const double _rasterHeightCm = 7.0;
-  static const double _playerHeightCm = 6.0;
+  static const double _playerHeightCm = 5.0;
 
   final List<String> _positions = [
     'address',
