@@ -420,7 +420,7 @@ class _PoseKeyPointsPainter extends CustomPainter {
       old.keypoints != keypoints || old.imageSize != imageSize;
 }
 
-// Top-level isolate helper: center-crop -> bilinear resize -> normalize
+// Top-level isolate helper: optional center-crop -> bilinear resize -> normalize
 // Receives a Map with keys: 'rgba' (Uint8List), 'w', 'h', 'size'
 // Returns a Map with keys:
 //  - 'image': nested List [size][size][3] with doubles in 0..1 (normalized, the model input)
@@ -430,13 +430,20 @@ Future<Map<String, dynamic>> _resizeNormalize(Map<String, dynamic> args) async {
   final int w = args['w'];
   final int h = args['h'];
   final int size = args['size'];
+  final bool centerCrop = (args['centerCrop'] as bool?) ?? true;
 
-  // compute centered square crop to preserve aspect ratio as MoveNet expects square input
-  final int cropSide = math.min(w, h);
-  final int cropX = ((w - cropSide) / 2).floor();
-  final int cropY = ((h - cropSide) / 2).floor();
-  final int cropW = cropSide;
-  final int cropH = cropSide;
+  int cropX = 0;
+  int cropY = 0;
+  int cropW = w;
+  int cropH = h;
+
+  if (centerCrop) {
+    final int cropSide = math.min(w, h);
+    cropX = ((w - cropSide) / 2).floor();
+    cropY = ((h - cropSide) / 2).floor();
+    cropW = cropSide;
+    cropH = cropSide;
+  }
 
   List<List<List<double>>> out = List.generate(
       size, (_) => List.generate(size, (_) => List.filled(3, 0.0)));
@@ -907,7 +914,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
   // ALT - für Backward Compatibility (deprecated)
   List<Map<String, double>>? _lastKeypoints;
   Map<String, int>? _lastCrop;
-  bool _centerCropEnabled = true;
+  bool _centerCropEnabled = false;
   // Shoulder tracking state (normalized coordinates 0..1)
   bool _autoTrackShoulders = false;
   // stored as pixel coordinates relative to last captured image
@@ -1665,14 +1672,17 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
         final jsonPath =
             '${outDir.path}${Platform.pathSeparator}${swingId}_${keyPositionSlug(position)}.json';
 
-        final recomputed = await _recomputePoseFromImage(
-          selection.imageBytes,
-          selection.videoPosition,
-        );
+        PoseFrame? poseForExport = selection.poseFrame;
+        if (poseForExport.keypoints.isEmpty) {
+          poseForExport = await _recomputePoseFromImage(
+            selection.imageBytes,
+            selection.videoPosition,
+          );
+        }
 
-        if (recomputed == null) {
+        if (poseForExport == null || poseForExport.keypoints.isEmpty) {
           if (kDebugMode) {
-            debugPrint('⚠️ Recompute failed for ${keyPositionSlug(position)}');
+            debugPrint('⚠️ No pose data for ${keyPositionSlug(position)}');
           }
           continue;
         }
@@ -1688,7 +1698,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
         const pixelRatio = 1.0;
         final raster = await _renderRasterImage(
-          recomputed,
+          poseForExport,
           captureSize,
           pixelRatio,
         );
@@ -1706,7 +1716,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
         await File(rasterPath).writeAsBytes(rasterBytes.buffer.asUint8List());
 
-        final keypointsJson = recomputed.keypoints.map((key, kp) {
+        final keypointsJson = poseForExport.keypoints.map((key, kp) {
           return MapEntry(key, {
             'x': kp.x,
             'y': kp.y,
@@ -1716,10 +1726,10 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
         final doc = {
           'position': keyPositionSlug(position),
-          'timestamp_ms': recomputed.timestamp.inMilliseconds,
+          'timestamp_ms': poseForExport.timestamp.inMilliseconds,
           'video_position_ms': selection.videoPosition.inMilliseconds,
-          'frame_index': recomputed.frameIndex,
-          'quality_score': recomputed.qualityScore,
+          'frame_index': poseForExport.frameIndex,
+          'quality_score': poseForExport.qualityScore,
           'image_path': imagePath,
           'raster_path': rasterPath,
           'keypoints': keypointsJson,
@@ -4312,7 +4322,7 @@ class _SwingQuickReviewScreenState extends State<SwingQuickReviewScreen> {
 
             // MoveNet Inferenz
             final cropData = _prepareMoveNetInput(rgba, w, h,
-                centerCrop: true, targetSize: 192);
+              centerCrop: false, targetSize: 192);
             final inputImage = cropData['image'] as List;
             final cropMeta = cropData['crop'] as Map<String, int>;
 
@@ -4820,8 +4830,8 @@ class _CameraSmokeTestScreenState extends State<CameraSmokeTestScreen> {
           final rgba = byteData.buffer.asUint8List();
 
           // MoveNet Inferenz
-          final cropData = _prepareMoveNetInput(rgba, w, h,
-              centerCrop: true, targetSize: 192);
+            final cropData = _prepareMoveNetInput(rgba, w, h,
+              centerCrop: false, targetSize: 192);
           final inputImage = cropData['image'] as List;
           final cropMeta = cropData['crop'] as Map<String, int>;
 
