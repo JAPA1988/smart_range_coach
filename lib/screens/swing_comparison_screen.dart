@@ -233,41 +233,25 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                     SizedBox(
                       width: paneWidth,
                       height: paneHeight,
-                      child: Container(
-                        color: Colors.black,
+                      child: ClipRect(
                         child: Stack(
                           children: [
-                            if (userPosition.skeletonImagePath != null)
-                              Positioned.fill(
-                                child: Image.file(
-                                  File(userPosition.skeletonImagePath!),
-                                  fit: BoxFit.contain,
-                                ),
-                              ),
-                            Positioned.fill(
-                              child:
-                                  CustomPaint(painter: _ComparisonGridPainter()),
-                            ),
-                            Positioned.fill(
-                              child: CustomPaint(
-                                painter: PoseOverlayPainter(
-                                  userPose,
-                                  requireBodyPresence: false,
+                            Positioned(
+                              left: projectionOffsetX,
+                              top: 0,
+                              width: projectionWidth,
+                              height: paneHeight,
+                              child: AspectRatio(
+                                aspectRatio: aspect,
+                                child: ProProjectionRasterView(
+                                  poseFrame: userPose,
+                                  sideCropCm: 0.0,
+                                  rightHalfOnly: false,
+                                  projectionShiftX: 0.0,
+                                  projectionShiftCm: 0.0,
+                                  showGrid: true,
+                                  showSpineAngleMarker: false,
                                   minConfidence: 0.35,
-                                ),
-                              ),
-                            ),
-                            Positioned.fill(
-                              child: CustomPaint(
-                                painter: _UserMarkerPainter(
-                                  userPose: userPose,
-                                  proPose: proPose,
-                                  showSpineMarker: _showSpineMarker,
-                                  showHipOverAnkleMarker:
-                                      _showHipOverAnkleMarker,
-                                  showShoulderOverHandMarker:
-                                      _showShoulderOverHandMarker,
-                                  showKneeFlexMarker: _showKneeFlexMarker,
                                 ),
                               ),
                             ),
@@ -550,32 +534,39 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   }
 
   Map<String, user.UserKeyPosition> _effectiveUserPositions() {
-    final marked = widget.userSwing.markedPositions;
-    if (marked != null && marked.isNotEmpty) {
-      return marked;
-    }
-
     final frames = widget.userSwing.frames;
-    if (frames.isEmpty) {
-      return const {};
+    final fallback = <String, user.UserKeyPosition>{};
+    if (frames.isNotEmpty) {
+      for (int i = 0; i < _positions.length; i++) {
+        final position = _positions[i];
+        final frameIndex = ((frames.length - 1) * (i / (_positions.length - 1)))
+            .round()
+            .clamp(0, frames.length - 1);
+        final frame = frames[frameIndex];
+
+        fallback[position] = user.UserKeyPosition(
+          frameIndex: frame.frameIndex,
+          timestampMs: frame.timestampMs,
+          keypoints: frame.keypoints,
+          markedAt: widget.userSwing.recordedAt,
+        );
+      }
     }
 
-    final mapped = <String, user.UserKeyPosition>{};
-    for (int i = 0; i < _positions.length; i++) {
-      final position = _positions[i];
-      final frameIndex = ((frames.length - 1) * (i / (_positions.length - 1)))
-          .round()
-          .clamp(0, frames.length - 1);
-      final frame = frames[frameIndex];
-
-      mapped[position] = user.UserKeyPosition(
-        frameIndex: frame.frameIndex,
-        timestampMs: frame.timestampMs,
-        keypoints: frame.keypoints,
-        markedAt: widget.userSwing.recordedAt,
-      );
+    final marked = widget.userSwing.markedPositions;
+    if (marked == null || marked.isEmpty) {
+      return fallback;
     }
-    return mapped;
+
+    final effective = Map<String, user.UserKeyPosition>.from(fallback);
+    for (final entry in marked.entries) {
+      final hasKeypoints = entry.value.keypoints.isNotEmpty;
+      if (hasKeypoints || !effective.containsKey(entry.key)) {
+        effective[entry.key] = entry.value;
+      }
+    }
+
+    return effective;
   }
 
   pose.PoseFrame _proToPoseFrame(ref.KeyPosition pos) {
