@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 
 import '../screens/comparison_movenet_data_screen.dart';
 import '../models/pose_frame.dart' as pose;
@@ -51,6 +53,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   bool _showHipOverAnkleMarker = false;
   bool _showShoulderOverHandMarker = false;
   bool _showKneeFlexMarker = false;
+  double? _userVideoAspect;
 
   static const double _metricsMinConfidence = 0.1;
   static const double _rasterHeightCm = 7.0;
@@ -69,6 +72,24 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   void initState() {
     super.initState();
     _loadProSwings();
+    _loadUserVideoAspect();
+  }
+
+  Future<void> _loadUserVideoAspect() async {
+    VideoPlayerController? controller;
+    try {
+      controller = VideoPlayerController.file(File(widget.userSwing.videoPath));
+      await controller.initialize();
+      final size = controller.value.size;
+      if (size.height > 0 && mounted) {
+        setState(() {
+          _userVideoAspect = size.width / size.height;
+        });
+      }
+    } catch (_) {
+    } finally {
+      await controller?.dispose();
+    }
   }
 
   Future<void> _loadProSwings() async {
@@ -222,7 +243,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final paneHeight = _cmToLogicalPx(_rasterHeightCm);
               final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
 
-              final aspect = proVideo.width / proVideo.height;
+              final proAspect = proVideo.width / proVideo.height;
+              final userAspect = _userVideoAspect ?? proAspect;
+              final userProjectionWidth = paneHeight * userAspect;
+              final proProjectionWidth = paneHeight * proAspect;
               final userZoom = _zoomToHeight(userPose, 0.85);
               final proZoom = _zoomToHeight(proPose, 0.85);
 
@@ -238,8 +262,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           child: Transform.scale(
                             scale: userZoom,
                             alignment: Alignment.center,
-                            child: AspectRatio(
-                              aspectRatio: aspect,
+                            child: SizedBox(
+                              width: userProjectionWidth,
+                              height: paneHeight,
                               child: ProProjectionRasterView(
                                 poseFrame: userPose,
                                 sideCropCm: 0.0,
@@ -264,8 +289,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           child: Transform.scale(
                             scale: proZoom,
                             alignment: Alignment.center,
-                            child: AspectRatio(
-                              aspectRatio: aspect,
+                            child: SizedBox(
+                              width: proProjectionWidth,
+                              height: paneHeight,
                               child: ProProjectionRasterView(
                                 poseFrame: proPose,
                                 sideCropCm: 0.0,
