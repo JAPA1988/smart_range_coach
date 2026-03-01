@@ -244,9 +244,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
 
               final aspect = proVideo.width / proVideo.height;
-              final proProjectionWidth = paneHeight * aspect;
-              final userZoom = _userZoomFromPro(userPose, proPose);
-              final proZoom = _zoomToHeight(proPose, 0.85);
+              final fullProjectionWidth = paneHeight * aspect;
 
               return SizedBox(
                 height: paneHeight,
@@ -257,21 +255,18 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       height: paneHeight,
                       child: ClipRect(
                         child: Center(
-                          child: Transform.scale(
-                            scale: userZoom,
-                            alignment: Alignment.center,
-                            child: AspectRatio(
-                              aspectRatio: aspect,
-                              child: ProProjectionRasterView(
-                                poseFrame: userPose,
-                                sideCropCm: 0.0,
-                                rightHalfOnly: false,
-                                projectionShiftX: 0.0,
-                                projectionShiftCm: 0.0,
-                                showGrid: true,
-                                showSpineAngleMarker: false,
-                                minConfidence: 0.35,
-                              ),
+                          child: SizedBox(
+                            width: fullProjectionWidth,
+                            height: paneHeight,
+                            child: ProProjectionRasterView(
+                              poseFrame: userPose,
+                              sideCropCm: 0.0,
+                              rightHalfOnly: false,
+                              projectionShiftX: 0.0,
+                              projectionShiftCm: 0.0,
+                              showGrid: true,
+                              showSpineAngleMarker: false,
+                              minConfidence: 0.35,
                             ),
                           ),
                         ),
@@ -283,22 +278,18 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       height: paneHeight,
                       child: ClipRect(
                         child: Center(
-                          child: Transform.scale(
-                            scale: proZoom,
-                            alignment: Alignment.center,
-                            child: SizedBox(
-                              width: proProjectionWidth,
-                              height: paneHeight,
-                              child: ProProjectionRasterView(
-                                poseFrame: proPose,
-                                sideCropCm: 0.0,
-                                rightHalfOnly: false,
-                                projectionShiftX: 0.0,
-                                projectionShiftCm: 0.0,
-                                showGrid: true,
-                                showSpineAngleMarker: false,
-                                minConfidence: 0.35,
-                              ),
+                          child: SizedBox(
+                            width: fullProjectionWidth,
+                            height: paneHeight,
+                            child: ProProjectionRasterView(
+                              poseFrame: proPose,
+                              sideCropCm: 0.0,
+                              rightHalfOnly: false,
+                              projectionShiftX: 0.0,
+                              projectionShiftCm: 0.0,
+                              showGrid: true,
+                              showSpineAngleMarker: false,
+                              minConfidence: 0.35,
                             ),
                           ),
                         ),
