@@ -248,6 +248,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
               final proProjectionWidth = paneHeight * proAspect;
               final userProjectionWidth = paneHeight * userAspect;
+              final userZoom = _userZoomFromPro(userPose, proPose);
 
               return SizedBox(
                 height: paneHeight,
@@ -261,18 +262,22 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           maxWidth: userProjectionWidth,
                           maxHeight: paneHeight,
                           alignment: Alignment.center,
-                          child: SizedBox(
-                            width: userProjectionWidth,
-                            height: paneHeight,
-                            child: ProProjectionRasterView(
-                              poseFrame: userPose,
-                              sideCropCm: 0.0,
-                              rightHalfOnly: false,
-                              projectionShiftX: 0.0,
-                              projectionShiftCm: 0.0,
-                              showGrid: true,
-                              showSpineAngleMarker: false,
-                              minConfidence: 0.35,
+                          child: Transform.scale(
+                            scale: userZoom,
+                            alignment: Alignment.center,
+                            child: SizedBox(
+                              width: userProjectionWidth,
+                              height: paneHeight,
+                              child: ProProjectionRasterView(
+                                poseFrame: userPose,
+                                sideCropCm: 0.0,
+                                rightHalfOnly: false,
+                                projectionShiftX: 0.0,
+                                projectionShiftCm: 0.0,
+                                showGrid: true,
+                                showSpineAngleMarker: false,
+                                minConfidence: 0.35,
+                              ),
                             ),
                           ),
                         ),
