@@ -268,15 +268,36 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                             child: SizedBox(
                               width: userProjectionWidth,
                               height: paneHeight,
-                              child: ProProjectionRasterView(
-                                poseFrame: userPose,
-                                sideCropCm: 0.0,
-                                rightHalfOnly: false,
-                                projectionShiftX: 0.0,
-                                projectionShiftCm: 0.0,
-                                showGrid: true,
-                                showSpineAngleMarker: false,
-                                minConfidence: 0.35,
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: ProProjectionRasterView(
+                                      poseFrame: userPose,
+                                      sideCropCm: 0.0,
+                                      rightHalfOnly: false,
+                                      projectionShiftX: 0.0,
+                                      projectionShiftCm: 0.0,
+                                      showGrid: true,
+                                      showSpineAngleMarker: false,
+                                      minConfidence: 0.35,
+                                    ),
+                                  ),
+                                  if (_selectedPosition == 'address')
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _UserMarkerPainter(
+                                          userPose: userPose,
+                                          proPose: proPose,
+                                          showSpineMarker: _showSpineMarker,
+                                          showHipOverAnkleMarker:
+                                              _showHipOverAnkleMarker,
+                                          showShoulderOverHandMarker:
+                                              _showShoulderOverHandMarker,
+                                          showKneeFlexMarker: _showKneeFlexMarker,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           ),
@@ -316,7 +337,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
           ),
           if (_selectedPosition == 'address')
             _buildMetricsTable(userPose, proPose),
-          _buildMarkerPanel(),
+          if (_selectedPosition == 'address') _buildMarkerPanel(),
         ],
       ),
     );
