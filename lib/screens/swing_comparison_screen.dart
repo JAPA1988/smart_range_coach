@@ -226,6 +226,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final aspect = proVideo.width / proVideo.height;
               final projectionWidth = paneHeight * aspect;
               final projectionOffsetX = (paneWidth - projectionWidth) / 2;
+                final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
+                final scaledUserPose =
+                  _scalePoseToFit(userPose, targetHeightPx, paneWidth, paneHeight);
 
               return SizedBox(
                 height: paneHeight,
@@ -252,7 +255,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                             Positioned.fill(
                               child: CustomPaint(
                                 painter: PoseOverlayPainter(
-                                  userPose,
+                                  scaledUserPose,
                                   requireBodyPresence: false,
                                   minConfidence: 0.35,
                                 ),
@@ -261,7 +264,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                             Positioned.fill(
                               child: CustomPaint(
                                 painter: _UserMarkerPainter(
-                                  userPose: userPose,
+                                  userPose: scaledUserPose,
                                   proPose: proPose,
                                   showSpineMarker: _showSpineMarker,
                                   showHipOverAnkleMarker:
