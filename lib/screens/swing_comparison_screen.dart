@@ -243,11 +243,9 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final paneHeight = _cmToLogicalPx(_rasterHeightCm);
               final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
 
-              final proAspect = proVideo.width / proVideo.height;
-              final userAspect = _userVideoAspect ?? proAspect;
-              final userProjectionWidth = paneHeight * userAspect;
-              final proProjectionWidth = paneHeight * proAspect;
-              final userZoom = _zoomToHeight(userPose, 0.85);
+              final aspect = proVideo.width / proVideo.height;
+              final proProjectionWidth = paneHeight * aspect;
+              final userZoom = _userZoomFromPro(userPose, proPose);
               final proZoom = _zoomToHeight(proPose, 0.85);
 
               return SizedBox(
@@ -262,9 +260,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                           child: Transform.scale(
                             scale: userZoom,
                             alignment: Alignment.center,
-                            child: SizedBox(
-                              width: userProjectionWidth,
-                              height: paneHeight,
+                            child: AspectRatio(
+                              aspectRatio: aspect,
                               child: ProProjectionRasterView(
                                 poseFrame: userPose,
                                 sideCropCm: 0.0,
@@ -358,6 +355,37 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     final kp = frame.getKeypoint(label);
     if (kp == null || kp.confidence < _metricsMinConfidence) return null;
     return Offset(kp.x, kp.y);
+  }
+
+  double? _visibleY(pose.PoseFrame frame, String label) {
+    final kp = frame.getKeypoint(label);
+    if (kp == null || kp.confidence < _metricsMinConfidence) return null;
+    return kp.y;
+  }
+
+  double? _verticalSpanForZoom(pose.PoseFrame frame) {
+    final nose = _visibleY(frame, 'nose');
+    final ankle = _visibleY(frame, 'right_ankle');
+    if (nose != null && ankle != null) {
+      return (nose - ankle).abs();
+    }
+
+    final shoulder = _visibleY(frame, 'right_shoulder');
+    final hip = _visibleY(frame, 'right_hip');
+    if (shoulder != null && hip != null) {
+      return (shoulder - hip).abs();
+    }
+
+    return null;
+  }
+
+  double _userZoomFromPro(pose.PoseFrame userPose, pose.PoseFrame proPose) {
+    final proSpan = _verticalSpanForZoom(proPose);
+    final userSpan = _verticalSpanForZoom(userPose);
+    if (proSpan == null || userSpan == null || userSpan <= 0) {
+      return 1.0;
+    }
+    return proSpan / userSpan;
   }
 
   double? _kneeFlexRight(pose.PoseFrame frame) {
