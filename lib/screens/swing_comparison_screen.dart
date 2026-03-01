@@ -245,6 +245,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
               final aspect = proVideo.width / proVideo.height;
               final fullProjectionWidth = paneHeight * aspect;
+              final userZoom = _userZoomFromPro(userPose, proPose);
 
               return SizedBox(
                 height: paneHeight,
@@ -254,19 +255,26 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       width: paneWidth,
                       height: paneHeight,
                       child: ClipRect(
-                        child: Center(
-                          child: SizedBox(
-                            width: fullProjectionWidth,
-                            height: paneHeight,
-                            child: ProProjectionRasterView(
-                              poseFrame: userPose,
-                              sideCropCm: 0.0,
-                              rightHalfOnly: false,
-                              projectionShiftX: 0.0,
-                              projectionShiftCm: 0.0,
-                              showGrid: true,
-                              showSpineAngleMarker: false,
-                              minConfidence: 0.35,
+                        child: OverflowBox(
+                          maxWidth: fullProjectionWidth,
+                          maxHeight: paneHeight,
+                          alignment: Alignment.center,
+                          child: Transform.scale(
+                            scale: userZoom,
+                            alignment: Alignment.center,
+                            child: SizedBox(
+                              width: fullProjectionWidth,
+                              height: paneHeight,
+                              child: ProProjectionRasterView(
+                                poseFrame: userPose,
+                                sideCropCm: 0.0,
+                                rightHalfOnly: false,
+                                projectionShiftX: 0.0,
+                                projectionShiftCm: 0.0,
+                                showGrid: true,
+                                showSpineAngleMarker: false,
+                                minConfidence: 0.35,
+                              ),
                             ),
                           ),
                         ),
