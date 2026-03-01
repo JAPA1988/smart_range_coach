@@ -224,15 +224,12 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               final paneWidth = (constraints.maxWidth - dividerWidth) / 2;
 
               final aspect = proVideo.width / proVideo.height;
-              final projectionWidth = paneWidth;
+              final projectionWidth = paneHeight * aspect;
+              final projectionOffsetX = (paneWidth - projectionWidth) / 2;
 
               final targetHeightPx = _cmToLogicalPx(_playerHeightCm);
               final scaledUserPose =
                   _scalePoseToFit(userPose, targetHeightPx, paneWidth, paneHeight);
-                final proTargetHeightPx = paneHeight;
-                final scaledProPose =
-                  _scalePoseToFit(
-                    proPose, proTargetHeightPx, paneWidth, paneHeight);
 
               return SizedBox(
                 height: paneHeight,
@@ -288,22 +285,28 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       width: paneWidth,
                       height: paneHeight,
                       child: ClipRect(
-                        child: Align(
-                          alignment: Alignment.center,
-                          child: SizedBox(
-                            width: projectionWidth,
-                            height: paneHeight,
-                            child: ProProjectionRasterView(
-                              poseFrame: scaledProPose,
-                              sideCropCm: 0.0,
-                              rightHalfOnly: false,
-                              projectionShiftX: 0.0,
-                              projectionShiftCm: 0.0,
-                              showGrid: true,
-                              showSpineAngleMarker: false,
-                              minConfidence: 0.35,
+                        child: Stack(
+                          children: [
+                            Positioned(
+                              left: projectionOffsetX,
+                              top: 0,
+                              width: projectionWidth,
+                              height: paneHeight,
+                              child: AspectRatio(
+                                aspectRatio: aspect,
+                                child: ProProjectionRasterView(
+                                  poseFrame: proPose,
+                                  sideCropCm: 0.0,
+                                  rightHalfOnly: false,
+                                  projectionShiftX: 0.0,
+                                  projectionShiftCm: 0.0,
+                                  showGrid: true,
+                                  showSpineAngleMarker: false,
+                                  minConfidence: 0.35,
+                                ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
                       ),
                     ),
