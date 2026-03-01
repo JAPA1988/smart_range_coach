@@ -233,29 +233,19 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                     SizedBox(
                       width: paneWidth,
                       height: paneHeight,
-                      child: ClipRect(
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              left: projectionOffsetX,
-                              top: 0,
-                              width: projectionWidth,
-                              height: paneHeight,
-                              child: AspectRatio(
-                                aspectRatio: aspect,
-                                child: ProProjectionRasterView(
-                                  poseFrame: userPose,
-                                  sideCropCm: 0.0,
-                                  rightHalfOnly: false,
-                                  projectionShiftX: 0.0,
-                                  projectionShiftCm: 0.0,
-                                  showGrid: true,
-                                  showSpineAngleMarker: false,
-                                  minConfidence: 0.35,
-                                ),
-                              ),
-                            ),
-                          ],
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: aspect,
+                          child: ProProjectionRasterView(
+                            poseFrame: userPose,
+                            sideCropCm: 0.0,
+                            rightHalfOnly: false,
+                            projectionShiftX: 0.0,
+                            projectionShiftCm: 0.0,
+                            showGrid: true,
+                            showSpineAngleMarker: false,
+                            minConfidence: 0.35,
+                          ),
                         ),
                       ),
                     ),
