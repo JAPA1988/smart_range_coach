@@ -277,7 +277,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                       width: paneWidth,
                       height: paneHeight,
                       child: ClipRect(
-                        child: Center(
+                        child: OverflowBox(
+                          maxWidth: fullProjectionWidth,
+                          maxHeight: paneHeight,
+                          alignment: Alignment.center,
                           child: SizedBox(
                             width: fullProjectionWidth,
                             height: paneHeight,
