@@ -431,9 +431,20 @@ class _UserMarkerPainter extends CustomPainter {
 
     if (showSpineMarker) {
       final hip = kp('right_hip');
+      final shoulder = kp('right_shoulder');
       if (hip != null) {
+        // Schablone 38° / 45°
         _drawSpineLine(canvas, paint, hip, size, 38);
         _drawSpineLine(canvas, paint, hip, size, 45);
+
+        // User‑Spine‑Line (blau, 2 cm, Richtung Schulter)
+        if (shoulder != null) {
+          final userPaint = Paint()
+            ..color = Colors.blue
+            ..strokeWidth = 3
+            ..style = PaintingStyle.stroke;
+          _drawUserSpineLine(canvas, userPaint, hip, shoulder);
+        }
       }
     }
 
@@ -466,11 +477,36 @@ class _UserMarkerPainter extends CustomPainter {
   void _drawSpineLine(
       Canvas canvas, Paint paint, Offset hip, Size size, double deg) {
     final angle = deg * math.pi / 180;
-    final length = size.height * 0.6;
+
+    // 2 cm in logical px
+    const logicalPixelsPerInch = 160.0;
+    final length = (2 / 2.54) * logicalPixelsPerInch;
 
     final end = Offset(
       hip.dx + length * math.sin(angle), // nach rechts
       hip.dy - length * math.cos(angle), // nach oben
+    );
+
+    canvas.drawLine(hip, end, paint);
+  }
+
+  void _drawUserSpineLine(
+      Canvas canvas, Paint paint, Offset hip, Offset shoulder) {
+    final dx = shoulder.dx - hip.dx;
+    final dy = shoulder.dy - hip.dy;
+    final dist = math.sqrt(dx * dx + dy * dy);
+    if (dist == 0) return;
+
+    // 2 cm in logical px
+    const logicalPixelsPerInch = 160.0;
+    final length = (2 / 2.54) * logicalPixelsPerInch;
+
+    final nx = dx / dist;
+    final ny = dy / dist;
+
+    final end = Offset(
+      hip.dx + nx * length,
+      hip.dy + ny * length,
     );
 
     canvas.drawLine(hip, end, paint);
