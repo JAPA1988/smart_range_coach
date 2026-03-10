@@ -62,10 +62,10 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
   bool _loading = true;
   bool _showRaster = false;
-  bool _showSpineMarker = true;
-  bool _showHipOverAnkleMarker = true;
-  bool _showShoulderOverHandMarker = true;
-  bool _showKneeFlexMarker = true;
+  bool _showSpineMarker = false;
+  bool _showHipOverAnkleMarker = false;
+  bool _showShoulderOverHandMarker = false;
+  bool _showKneeFlexMarker = false;
 
   double? _userVideoAspect;
 
@@ -186,7 +186,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
           ? const Center(child: CircularProgressIndicator())
           : _entries.isEmpty
               ? const Center(child: Text('Keine Key Positions gefunden.'))
-              : Column(
+              : SingleChildScrollView(
+                  child: Column(
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(12),
@@ -266,27 +267,31 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                         ),
                       ),
                     const SizedBox(height: 8),
-                    Expanded(
-                      child: Container(
-                        margin: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: selected == null
-                            ? const Center(child: Text('Keine Auswahl'))
-                            : AspectRatio(
-                                aspectRatio: aspect,
-                                child: _showRaster
-                                    ? _buildRasterView(selected)
-                                    : Image.file(
-                                        File(selected.imagePath),
-                                        fit: BoxFit.contain,
-                                      ),
-                              ),
+                    Container(
+                      margin: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(12),
                       ),
+                      child: selected == null
+                          ? const Center(child: Text('Keine Auswahl'))
+                          : AspectRatio(
+                              aspectRatio: aspect,
+                              child: _showRaster
+                                  ? _buildRasterView(selected)
+                                  : Image.file(
+                                      File(selected.imagePath),
+                                      fit: BoxFit.contain,
+                                    ),
+                            ),
                     ),
+                    if (_showRaster && selected != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                        child: _buildMetricsRow(_poseFromKeypoints(selected)),
+                      ),
                   ],
+                ),
                 ),
     );
   }
@@ -335,6 +340,64 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
         ),
       ],
     );
+  }
+
+  Widget _buildMetricsRow(pose.PoseFrame poseFrame) {
+    final spine = _spineAngle(poseFrame);
+    final kneeFlex = _kneeFlexRight(poseFrame);
+
+    String fmt(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}°';
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        Text('Spine Angle: ${fmt(spine)}'),
+        Text('Knee Flex: ${fmt(kneeFlex)}'),
+      ],
+    );
+  }
+
+  double? _spineAngle(pose.PoseFrame frame) {
+    final hip = frame.getKeypoint('right_hip');
+    final shoulder = frame.getKeypoint('right_shoulder');
+    if (hip == null || shoulder == null || !hip.isVisible || !shoulder.isVisible) {
+      return null;
+    }
+    final dx = hip.x - shoulder.x;
+    final dy = hip.y - shoulder.y;
+    if (dx == 0 && dy == 0) return null;
+    return (math.atan2(dx, dy).abs()) * 180 / math.pi;
+  }
+
+  double? _kneeFlexRight(pose.PoseFrame frame) {
+    final hip = frame.getKeypoint('right_hip');
+    final knee = frame.getKeypoint('right_knee');
+    final ankle = frame.getKeypoint('right_ankle');
+    if (hip == null ||
+        knee == null ||
+        ankle == null ||
+        !hip.isVisible ||
+        !knee.isVisible ||
+        !ankle.isVisible) {
+      return null;
+    }
+    final angle = _angleBetween(
+      Offset(hip.x, hip.y),
+      Offset(knee.x, knee.y),
+      Offset(ankle.x, ankle.y),
+    );
+    if (angle == null) return null;
+    return 180.0 - angle;
+  }
+
+  double? _angleBetween(Offset a, Offset b, Offset c) {
+    final ab = a - b;
+    final cb = c - b;
+    final dot = ab.dx * cb.dx + ab.dy * cb.dy;
+    final mag = ab.distance * cb.distance;
+    if (mag == 0) return null;
+    final cos = (dot / mag).clamp(-1.0, 1.0);
+    return math.acos(cos) * 180 / math.pi;
   }
 }
 
@@ -415,7 +478,7 @@ class _UserMarkerPainter extends CustomPainter {
 
   void _drawKneeFlexTemplate(
       Canvas canvas, Paint paint, Offset knee, Size size) {
-    const angleDeg = 170.0;
+    const angleDeg = 165.0;
     final halfAngle = (angleDeg / 2) * math.pi / 180;
 
     // 1 cm in logical px (wie im Raster verwendet)
