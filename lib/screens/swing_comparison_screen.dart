@@ -72,6 +72,44 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
   String? _selectedPosition;
   final Map<String, KeyPositionEntry> _entries = {};
 
+  static const Map<String, Map<String, double>> _proAddressKeypoints = {
+    'nose': {'x': 0.5992562600544521, 'y': 0.27410956365721567, 'confidence': 0.7672773769923619},
+    'left_eye': {'x': 0.6049907803535461, 'y': 0.25403877241270884, 'confidence': 0.684700437954494},
+    'right_eye': {'x': 0.6078580362456185, 'y': 0.2534653203827994, 'confidence': 0.6371040259088788},
+    'left_ear': {'x': 0.5671429974692208, 'y': 0.2259396825517927, 'confidence': 0.666923463344574},
+    'right_ear': {'x': 0.5654226456369672, 'y': 0.22135206844125474, 'confidence': 0.6181801216942924},
+    'left_shoulder': {'x': 0.47424394318035673, 'y': 0.2838582183633532, 'confidence': 0.8039782387869698},
+    'right_shoulder': {'x': 0.4960350862571171, 'y': 0.31367766857147217, 'confidence': 0.7919357759611947},
+    'left_elbow': {'x': 0.46105457629476276, 'y': 0.45302626490592957, 'confidence': 0.666923463344574},
+    'right_elbow': {'x': 0.47137669154575895, 'y': 0.46162802406719755, 'confidence': 0.8039782387869698},
+    'left_wrist': {'x': 0.4810297836860021, 'y': 0.5619819362958273, 'confidence': 0.4375430941581726},
+    'right_wrist': {'x': 0.4964173932870229, 'y': 0.5686722000439962, 'confidence': 0.5004315376281738},
+    'left_hip': {'x': 0.31769182852336336, 'y': 0.4874333270958492, 'confidence': 0.7586756348609924},
+    'right_hip': {'x': 0.319985636643001, 'y': 0.4920209263052259, 'confidence': 0.806845486164093},
+    'left_knee': {'x': 0.39338736874716623, 'y': 0.681259742804936, 'confidence': 0.6824066468647548},
+    'right_knee': {'x': 0.39797496795654297, 'y': 0.705344694001334, 'confidence': 0.9020383613450187},
+    'left_ankle': {'x': 0.37331657324518475, 'y': 0.8326507977076939, 'confidence': 0.7615428652082171},
+    'right_ankle': {'x': 0.33661571570805143, 'y': 0.9238294959068298, 'confidence': 0.8934366021837506},
+  };
+
+  Offset? _proPoint(String label) {
+    final raw = _proAddressKeypoints[label];
+    if (raw == null) return null;
+    return Offset(raw['x'] ?? 0.0, raw['y'] ?? 0.0);
+  }
+
+  double? _proKneeFlexAngle() {
+    final hip = _proPoint('right_hip');
+    final knee = _proPoint('right_knee');
+    final ankle = _proPoint('right_ankle');
+    if (hip == null || knee == null || ankle == null) {
+      return null;
+    }
+    final angle = _angleBetween(hip, knee, ankle);
+    if (angle == null) return null;
+    return 180.0 - angle;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -226,7 +264,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                         ],
                       ),
                     ),
-                    if (_showRaster)
+                    if (_showRaster && _selectedPosition == 'address')
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                         child: Wrap(
@@ -250,7 +288,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                               (v) => setState(
                                   () => _showShoulderOverHandMarker = v),
                             ),                            _markerToggle(
-                              'Knee Flex 170°',
+                              'Knee Flex (Pro)',
                               _showKneeFlexMarker,
                               (v) => setState(() => _showKneeFlexMarker = v),
                             ),                          ],
@@ -288,7 +326,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
                     if (_showRaster && selected != null)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                        child: _buildMetricsRow(_poseFromKeypoints(selected)),
+                        child: _buildMetricsRow(_poseFromKeypoints(selected), aspect),
                       ),
                   ],
                 ),
@@ -312,6 +350,21 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
 
   Widget _buildRasterView(KeyPositionEntry selected) {
     final poseFrame = _poseFromKeypoints(selected);
+    final showMarkers = _selectedPosition == 'address';
+    final proKneeFlexAngle = _proKneeFlexAngle();
+
+    if (!showMarkers) {
+      return ProProjectionRasterView(
+        poseFrame: poseFrame,
+        sideCropCm: 0.0,
+        rightHalfOnly: false,
+        projectionShiftX: 0.0,
+        projectionShiftCm: 0.0,
+        showGrid: true,
+        showSpineAngleMarker: false,
+        minConfidence: 0.35,
+      );
+    }
 
     return Stack(
       children: [
@@ -335,6 +388,7 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
               showHipOverAnkleMarker: _showHipOverAnkleMarker,
               showShoulderOverHandMarker: _showShoulderOverHandMarker,
               showKneeFlexMarker: _showKneeFlexMarker,
+              proKneeFlexAngle: proKneeFlexAngle,
             ),
           ),
         ),
@@ -342,8 +396,8 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     );
   }
 
-  Widget _buildMetricsRow(pose.PoseFrame poseFrame) {
-    final spine = _spineAngle(poseFrame);
+  Widget _buildMetricsRow(pose.PoseFrame poseFrame, double aspect) {
+    final spine = _spineAngle(poseFrame, aspect);
     final kneeFlex = _kneeFlexRight(poseFrame);
 
     String fmt(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}°';
@@ -357,14 +411,17 @@ class _SwingComparisonScreenState extends State<SwingComparisonScreen> {
     );
   }
 
-  double? _spineAngle(pose.PoseFrame frame) {
+  double? _spineAngle(pose.PoseFrame frame, double aspect) {
     final hip = frame.getKeypoint('right_hip');
     final shoulder = frame.getKeypoint('right_shoulder');
     if (hip == null || shoulder == null || !hip.isVisible || !shoulder.isVisible) {
       return null;
     }
-    final dx = hip.x - shoulder.x;
+
+    // X wird für das aktuelle Aspect skaliert, damit Winkel zur Anzeige passt
+    final dx = (hip.x - shoulder.x) * aspect;
     final dy = hip.y - shoulder.y;
+
     if (dx == 0 && dy == 0) return null;
     return (math.atan2(dx, dy).abs()) * 180 / math.pi;
   }
@@ -407,6 +464,7 @@ class _UserMarkerPainter extends CustomPainter {
   final bool showHipOverAnkleMarker;
   final bool showShoulderOverHandMarker;
   final bool showKneeFlexMarker;
+  final double? proKneeFlexAngle;
 
   _UserMarkerPainter({
     required this.poseFrame,
@@ -414,6 +472,7 @@ class _UserMarkerPainter extends CustomPainter {
     required this.showHipOverAnkleMarker,
     required this.showShoulderOverHandMarker,
     required this.showKneeFlexMarker,
+    required this.proKneeFlexAngle,
   });
 
   @override
@@ -468,8 +527,9 @@ class _UserMarkerPainter extends CustomPainter {
 
     if (showKneeFlexMarker) {
       final knee = kp('right_knee');
-      if (knee != null) {
-        _drawKneeFlexTemplate(canvas, paint, knee, size);
+      final angle = proKneeFlexAngle;
+      if (knee != null && angle != null) {
+        _drawKneeFlexTemplate(canvas, paint, knee, size, angle);
       }
     }
   }
@@ -513,15 +573,14 @@ class _UserMarkerPainter extends CustomPainter {
   }
 
   void _drawKneeFlexTemplate(
-      Canvas canvas, Paint paint, Offset knee, Size size) {
-    const angleDeg = 165.0;
+      Canvas canvas, Paint paint, Offset knee, Size size, double angleDeg) {
     final halfAngle = (angleDeg / 2) * math.pi / 180;
 
-    // 1 cm in logical px (wie im Raster verwendet)
+    // 1 cm in logical px
     const logicalPixelsPerInch = 160.0;
     final length = (1 / 2.54) * logicalPixelsPerInch;
 
-    // Horizontale Richtung nach rechts, symmetrisch nach oben/unten
+    // Spitze nach rechts
     final dx = math.cos(halfAngle) * length;
     final dy = math.sin(halfAngle) * length;
 
